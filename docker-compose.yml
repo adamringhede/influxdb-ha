@@ -1,0 +1,21 @@
+version: '2'
+services: 
+  influxdb-relay-1:
+    image: influxdb-relay:latest
+    ports:
+      - "9096:9096"
+    depends_on: 
+      - influxdb-1
+      - influxdb-2
+  influxdb-1:
+    image: influxdb:1.2
+    ports:
+      - "8086:8086"
+      - "8088:8088"
+    hostname: influxdb
+  influxdb-2:
+    image: influxdb:1.2
+    ports:
+      - "7086:8086"
+      - "7088:8088"
+    hostname: influxdb

@@ -1,0 +1,16 @@
+[[http]]
+name = "example-http"
+bind-addr = "0.0.0.0:9096"
+output = [
+    { name="local1", location = "http://influxdb-1:8086/write" },
+    { name="local2", location = "http://influxdb-2:7086/write" },
+]
+
+[[udp]]
+name = "example-udp"
+bind-addr = "0.0.0.0:9096"
+read-buffer = 0 # default
+output = [
+    { name="local1", location="influxdb-1:8089", mtu=512 },
+    { name="local2", location="influxdb-2:7089", mtu=1024 },
+]
