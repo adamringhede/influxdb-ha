@@ -1,4 +1,4 @@
-package main
+package router
 
 import (
 	"net/http"
@@ -71,8 +71,4 @@ func Start() {
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
 	}
-}
-
-func main() {
-	Start()
 }
