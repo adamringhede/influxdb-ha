@@ -1,0 +1,7 @@
+FROM golang:1.7
+
+
+COPY . /router
+RUN cd /router
+RUN go build -o /router/bin/routerd /router/cmd/routerd/main.go
+CMD /router/bin/routerd

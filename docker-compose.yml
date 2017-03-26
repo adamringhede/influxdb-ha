@@ -19,3 +19,8 @@ services:
       - "7086:8086"
       - "7088:8088"
     hostname: influxdb-2
+  etcd:
+    image: quay.io/coreos/etcd:v3.1.4
+    ports:
+      - "2379:2379"
+    hostname: etcd
