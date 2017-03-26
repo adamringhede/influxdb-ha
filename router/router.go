@@ -3,9 +3,9 @@ package router
 import (
 	"net/http"
 	"log"
-	"io/ioutil"
+	//"io/ioutil"
 	"io"
-	"bytes"
+	//"bytes"
 	"net/url"
 	"math/rand"
 	"time"
@@ -48,50 +48,44 @@ type Resolver interface {
 	GetDataNodes()
 }
 type HTTPHandler struct {
-	client *http.Client
-	config *RouterConfig
+	client 		*http.Client
+	config 		*RouterConfig
+	replicaSets 	[]ReplicaSet
 }
 func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	buf, err := ioutil.ReadAll(r.Body)
+	/*buf, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		log.Fatal("request",err)
-	}
+	}*/
 	log.Printf("Received request %s?%s\n", r.URL.Path, r.URL.RawQuery)
 	if r.URL.Path == "/write" {
 
-		/*
+		// TODO Need to refactor the creation of relays
+		// TODO Find shard key for the specified database and measurement
+		// TODO Hash tags as necessary and add as additional tags. If a tag is not included which is needed for the shard key return an error
+		// TODO Select the correct replicaset based on sharding or use the default one (first)
 
-		Once we know the replica set to use by sharding (if needed),
-		then we can use a local relay for it and pass on the request.
+		rs := h.replicaSets[0]
+		outputs := []relay.HTTPOutputConfig{}
+		for _, replica := range rs.Replicas {
+			output := relay.HTTPOutputConfig{}
+			output.Name = replica.Name
+			output.Location = "http://" + replica.Location + "/write"
+			outputs = append(outputs, output)
+		}
 
 		relayHttpConfig := relay.HTTPConfig{}
+		relayHttpConfig.Name = rs.Name
+		relayHttpConfig.Outputs = outputs
 		relayHttp, relayErr := relay.NewHTTP(relayHttpConfig)
 		if relayErr != nil {
 			log.Panic(relayErr)
 		}
-		relayHttp.(relay.HTTP).ServeHTTP(w, r)
-		*/
-
-		// TODO Find shard key for the specified database and measurement
-		// TODO Hash tags as necessary and add as additional tags. If a tag is not included which is needed for the shard key return an error
-
-		// send to any relay until a 200 response is received
-		// if shard is enabled, select the right replica set
-		// TODO the config should be one router only
-		// TODO validate that the configuration includes at least one relay
-		relays := h.config.Relays
-		for i, relayConf := range relays {
-			res, err := h.client.Post("http://" + relayConf.Location + "/write?" + r.URL.RawQuery, "application/octet-stream", bytes.NewBuffer(buf))
-			if res.StatusCode == 200 || i == len(relays) - 1 {
-				handleRouteError("write", err)
-				passBack(&w, res)
-				break
-			}
-		}
+		relayHttp.(*relay.HTTP).ServeHTTP(w, r)
 
 	} else {
 		// send to any replica
-		hosts := h.config.Data
+		hosts := h.replicaSets[0].Replicas
 
 		// when the selected measurement is sharded, the correct replicaset needs to be found
 		// (non sharded measurements are only on one replicaset and need to lookup in a config server what shard they are on)
@@ -109,7 +103,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if queryParam != "" {
 			q, parseErr := influxql.ParseQuery(r.URL.Query()["q"][0])
 			if parseErr != nil {
-				log.Panic(err)
+				log.Panic(parseErr)
 			}
 			selectStatements := []*influxql.SelectStatement{}
 			selectStatement := ""
@@ -127,6 +121,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// TODO if creating a database, use a post request instead.
 
 		/*
 		if the query includes a statement for a sharded measurement,
@@ -170,13 +165,13 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 
-func Start(config *RouterConfig) {
+func Start(config *RouterConfig, replicaSets []ReplicaSet) {
 	addr := ":5096"
 	if config.BindAddr != "" {
 		addr = config.BindAddr
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
-	http.Handle("/", &HTTPHandler{client, config})
+	http.Handle("/", &HTTPHandler{client, config, replicaSets})
 
 	log.Println("Listening on " + addr)
 	err := http.ListenAndServe(addr, nil)

@@ -4,21 +4,20 @@ import (
 	"github.com/adamringhede/influxdb-ha/router"
 	"flag"
 	"log"
-	"errors"
 )
 
 func main() {
 	// if given a config file filename, parse the file and give
 	// the configuration to the router.
 	configFileName := flag.String("config", "", "Path to configuration file")
-	routerName := flag.String("name", "", "Name of the router. Should be same as in config file.")
+	//routerName := flag.String("name", "", "Name of the router. Should be same as in config file.")
 	flag.Parse()
 
 	config, err := router.ParseConfigFile(*configFileName)
 	if err != nil {
 		log.Panic(err)
 	}
-
+/*
 	if len(config.Routers) == 0 {
 		log.Panic(errors.New("Configuration requires at least one router."))
 	}
@@ -36,8 +35,9 @@ func main() {
 		}
 	} else {
 		routerConfig = &config.Routers[0]
-	}
+	}*/
+	routerConfig := &config.Routers[0]
 	log.Printf("Starting router: %s", routerConfig.Name)
 
-	router.Start(routerConfig)
+	router.Start(routerConfig, config.ReplicaSets)
 }

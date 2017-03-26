@@ -28,8 +28,14 @@ func (r *RouterConfig) Validate() error {
 	return nil
 }
 
+type ReplicaSet struct {
+	Name		string 	`toml:"name"`
+	Replicas	[]node	`toml:"replica"`
+}
+
 type FileConfig struct {
-	Routers []RouterConfig	`toml:"router"`
+	Routers 	[]RouterConfig	`toml:"router"`
+	ReplicaSets 	[]ReplicaSet	`toml:"replicaSet"`
 }
 
 func ParseConfigFile(filename string) (FileConfig, error) {
@@ -42,11 +48,11 @@ func ParseConfigFile(filename string) (FileConfig, error) {
 	if decodeErr != nil {
 		return config, decodeErr
 	}
-	for _, r := range config.Routers {
+	/*for _, r := range config.Routers {
 		validationErr := r.Validate()
 		if validationErr != nil {
 			return config, validationErr
 		}
-	}
+	}*/
 	return config, nil
 }

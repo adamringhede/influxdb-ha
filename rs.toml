@@ -30,6 +30,7 @@ name = "rs1"
     [[replicaSet.replica]]
         name = "data1"
         location = "192.168.99.100:8086"
+        # TODO Add more config fields. use the same as in relay config
     [[replicaSet.replica]]
         name = "data2"
         location = "192.168.99.100:7086"
