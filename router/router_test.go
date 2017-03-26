@@ -40,13 +40,15 @@ func parseResp(resp *http.Response) Response {
 }
 
 func TestRouting(t *testing.T) {
-	config, _ := router.ParseConfigFile("../ha-router.toml")
-	go router.Start(&config.Routers[0])
-	values, _ := url.ParseQuery("db=mydb&q=SELECT \"value\" FROM \"cpu_load_short\" WHERE \"region\"='us-west' AND \"host\"='server01'")
+	config, _ := router.ParseConfigFile("../rs.toml")
+	go router.Start(&config.Routers[0], config.ReplicaSets)
+	//q := "SELECT \"value\" FROM \"cpu_load_short\" WHERE \"region\"='us-west' AND \"host\"='server01'"
+	q := `select * from cpu_load_short GROUP BY *`
+	values, _ := url.ParseQuery("chunked=true&db=r&q="+q)
 	query := values.Encode()
 	resp, err := client.Get("http://localhost:5096/query?" + query)
 	if err != nil {
-		log.Panic(err)
+		log.Fatal(err)
 	}
 	x := parseResp(resp)
 	assert.Equal(t, 1, len(x.Results))

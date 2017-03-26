@@ -11,6 +11,11 @@ curl -G 'http://192.168.99.100:8086/query?pretty=true' --data-urlencode "db=mydb
 
 
 
+Chunked test
+
+curl -Gi 'http://192.168.99.100:8086/query?pretty=false' --data-urlencode "db=r" --data-urlencode "q=SELECT \"value\" FROM \"cpu_load_short\" GROUP BY *" --data-urlencode "chunked=true"
+
+
 
 Router
 

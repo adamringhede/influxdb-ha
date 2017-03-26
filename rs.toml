@@ -24,22 +24,15 @@ bind-addr = "0.0.0.0:5096"
 
 [[replicaSet]]
 name = "rs1"
-    [[replicaSet.relay]]
-        name = "relay1"
-        location = "192.168.99.100:9096"
     [[replicaSet.replica]]
         name = "data1"
         location = "192.168.99.100:8086"
-        # TODO Add more config fields. use the same as in relay config
     [[replicaSet.replica]]
         name = "data2"
         location = "192.168.99.100:7086"
 
 [[replicaSet]]
 name = "rs2"
-    [[replicaSet.relay]]
-        name = "relay1"
-        location = "192.168.99.100:29096"
     [[replicaSet.replica]]
         name = "data1"
         location = "192.168.99.100:28086"

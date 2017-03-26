@@ -59,19 +59,35 @@ func (f *tagFinder) findTags(cond influxql.Expr) {
 	}
 }
 
+func findConditions(stmt *influxql.SelectStatement) []influxql.Expr {
+	conditions := []influxql.Expr{}
+	conditions = append(conditions, stmt.Condition)
+	for _, source := range stmt.Sources {
+		switch s := source.(type) {
+		case *influxql.SubQuery:
+			conditions = append(conditions, findConditions(s.Statement)...)
+		}
+	}
+	return conditions
+}
+
 func TestFindShard(t *testing.T) {
 
 	//queryParams := "SELECT \"value\" FROM \"cpu_load_short\" WHERE \"region\"=1 AND (\"region\"!='us-west' AND \"host\"='server01'); SELECT * FROM test"
-	queryParams := `SELECT * FROM (SELECT "active" / "total" FROM "mem" WHERE time > now() - 2m GROUP BY *)`
+	queryParams := `SELET * FROM (SELECT "active" / "total" FROM "mem" WHERE "region"='us-west' AND time > now() - 2m GROUP BY *)`
+	//queryParams := `SELECT BOTTOM("water_level",3), MEAN("water_level") / SUM("water_level") FROM "h2o_feet"`
 	q, parseErr := influxql.ParseQuery(queryParams)
+	ers := string(parseErr.Error())
+	log.Print(ers)
 	if parseErr != nil {
 		log.Panic(parseErr)
 	}
-	// TODO Add support for nested queries by selecting the deepest source.
 
 	for _, stmt := range getSelectStatements(q.Statements) {
 		finder := &tagFinder{make(map[string]bool), make(map[string][]string)}
-		finder.findTags(stmt.Condition)
+		for _, condition := range findConditions(stmt) {
+			finder.findTags(condition)
+		}
 		log.Print(finder)
 	}
 
