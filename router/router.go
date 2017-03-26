@@ -13,11 +13,6 @@ import (
 	"github.com/influxdata/influxdb/models"
 	"encoding/json"
 	"errors"
-	/*"io/ioutil"
-	"strings"
-	"bufio"
-	"os"
-	"github.com/derekparker/delve/dwarf/reader"*/
 	"bufio"
 )
 
@@ -149,20 +144,11 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		relayHttp.(*relay.HTTP).ServeHTTP(w, r)
 
 	} else {
-		// send to any replica
 		hosts := h.replicaSets[0].Replicas
-
-		// when the selected measurement is sharded, the correct replicaset needs to be found
-		// (non sharded measurements are only on one replicaset and need to lookup in a config server what shard they are on)
-		// a set of hosts need to be resolved for the shard's replicate
-		// the shared is selected based on the given shard key.
-		// if the query does not match the any shard key,
 
 		// TODO Find the chunk based on a shard key matching the query Option.
 		// TODO Get the replicaset hosts of the shard holding that shard
 		// TODO Select one of those hosts and pass on the query.
-
-
 
 		queryParam := r.URL.Query().Get("q")
 		if queryParam != "" {
@@ -172,13 +158,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				jsonError(w, http.StatusBadRequest, "error parsing query: " + parseErr.Error())
 				return
 			}
-			log.Printf("There are %d statements in the query", len(q.Statements))
-			//otherStatements := influxql.Statements{}
 			for _, stmt := range q.Statements {
-
-				// TODO append all statements on a slice with the corresponding handler
-				// so that results can be returned in the correct order.
-				// The handler should return a slice of Result.
 				switch s := stmt.(type) {
 				case 	*influxql.CreateContinuousQueryStatement,
 					*influxql.CreateDatabaseStatement,
@@ -201,8 +181,8 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					*influxql.DeleteStatement,
 					*influxql.DropSeriesStatement:
 					// Send the statement to every replica in every replicaset.
-					// Keep track of failed queries.
-					log.Print("Broadcast: " + s.String())
+					// TODO Keep track of failed queries.
+					log.Print("Broadcasting: " + s.String())
 
 					// TODO change config file so that this can be changed to send to all RSs
 					for _, replica := range hosts {
@@ -299,52 +279,10 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// TODO if creating a database, use a post request instead.
-		// Create different types of handlers for different statements
-		//
-
-		/*
-		func (*AlterRetentionPolicyStatement) node()  {}
-
-
-		 */
-
-		/*
-		if the query includes a statement for a sharded measurement,
-		then that query needs to be processed separately and appended to the result.
-		 */
-
-
-		/*
-		this need to be fixed. need to decide what statements should be
-		sent to all hosts. read statements should only be sent to the first
-		host. things that are specific to each host should not be allowed
-		to access through the router, such as dropping a shard. or we implement
-		support for those statements as well. some like SHOW SERIES should
-		be sent to all shards and be concatenated, but only to one host in each
-		replicaset.
-		 */
-
-		/*if len(otherStatements) > 0 {
-			for i, host := range hosts {
-				baseUrl, _ := url.Parse("http://" + host + r.URL.Path)
-				queryValues := r.URL.Query()
-				queryValues.Set("q", otherStatements.String())
-				baseUrl.RawQuery = queryValues.Encode()
-				res, err := client.Get(baseUrl.String())
-				handleRouteError("query", err)
-				if i == len(hosts) - 1 {
-					passBack(&w, res)
-				}
-			}
-		}*/
-
 		// This is the default handler.
 		selectedHost := hosts[rand.Intn(len(hosts))]
 		log.Print("Selected host " + selectedHost.Name + " at " + selectedHost.Location)
 		baseUrl, _ := url.Parse("http://" + selectedHost.Location + r.URL.Path)
-		//queryValues := r.URL.Query()
-		//queryValues.Set("q", selectStatement)
 		baseUrl.RawQuery = r.URL.Query().Encode()
 		res, err := h.client.Post(baseUrl.String(), "", r.Body)
 		handleRouteError("query", err)
