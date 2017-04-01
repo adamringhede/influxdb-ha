@@ -1,4 +1,4 @@
-package router_test
+package router
 
 import (
 	"testing"
@@ -15,61 +15,6 @@ func getSelectStatements(statements influxql.Statements) (result []*influxql.Sel
 	return result
 }
 
-type tagFinder struct {
-	tags	map[string]bool
-	values	map[string][]string // it could be interface to allow for numerical values as well
-}
-
-func (f *tagFinder) putValue(key string, value interface{}) {
-	_, ok := f.values[key]
-	if !ok {
-		f.values[key] = []string{}
-	}
-	switch v := value.(type) {
-	case *influxql.StringLiteral: f.values[key] = append(f.values[key], v.Val)
-	}
-
-}
-
-func (f *tagFinder) findTags(cond influxql.Expr) {
-	// if op isn't 22 or 23, then it is some equality operation.
-	switch expr := cond.(type) {
-	case *influxql.ParenExpr: f.findTags(expr.Expr)
-	case *influxql.BinaryExpr:
-		if expr.Op == influxql.AND || expr.Op == influxql.OR {
-			f.findTags(expr.LHS)
-			f.findTags(expr.RHS)
-		} else {
-			tagKey := expr.LHS.(*influxql.VarRef).Val
-
-			/*
-			greater than and less than operators could also work here to limit
-			the number of shards that need to be queried.
-			 */
-			if expr.Op == influxql.EQ {
-				current, ok := f.tags[tagKey]
-				if !ok || current != false {
-					f.tags[tagKey] = true
-					f.putValue(tagKey, expr.RHS)
-				}
-			} else {
-				f.tags[tagKey] = false
-			}
-		}
-	}
-}
-
-func findConditions(stmt *influxql.SelectStatement) []influxql.Expr {
-	conditions := []influxql.Expr{}
-	conditions = append(conditions, stmt.Condition)
-	for _, source := range stmt.Sources {
-		switch s := source.(type) {
-		case *influxql.SubQuery:
-			conditions = append(conditions, findConditions(s.Statement)...)
-		}
-	}
-	return conditions
-}
 
 func TestFindShard(t *testing.T) {
 

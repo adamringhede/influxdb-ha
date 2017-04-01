@@ -144,11 +144,6 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		relayHttp.(*relay.HTTP).ServeHTTP(w, r)
 
 	} else {
-		hosts := h.replicaSets[0].Replicas
-
-		// TODO Find the chunk based on a shard key matching the query Option.
-		// TODO Get the replicaset hosts of the shard holding that shard
-		// TODO Select one of those hosts and pass on the query.
 
 		queryParam := r.URL.Query().Get("q")
 		if queryParam != "" {
@@ -184,17 +179,20 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					// TODO Keep track of failed queries.
 					log.Print("Broadcasting: " + s.String())
 
-					// TODO change config file so that this can be changed to send to all RSs
-					for _, replica := range hosts {
-						results, err, res := request(s, replica.Location, h.client, r)
-						if err != nil {
-							// We may want to handle errors differently
-							// Eg. with a retry,
-							passBack(&w, res)
-							return
+					// TODO Ping all replicas to make sure they are reachable before making a meta query.
+					// ..return an error if not.
+					for _, set := range h.replicaSets {
+						for _, replica := range set.Replicas {
+							results, err, res := request(s, replica.Location, h.client, r)
+							if err != nil {
+								// We may want to handle errors differently
+								// Eg. with a retry,
+								passBack(&w, res)
+								return
+							}
+							// Maybe only send one of the results.
+							allResults = append(allResults, results...)
 						}
-						// Maybe only send one of the results.
-						allResults = append(allResults, results...)
 					}
 
 
@@ -205,8 +203,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					*influxql.ShowStatsStatement,
 					*influxql.ShowDiagnosticsStatement:
 
-					// Not supported. Return an error. Client must connect to the
-					// individual data node.
+					// Not supported. Client must connect to the individual data node.
 					jsonError(w, 400, "Statement is not supported on router: " + s.String())
 					return
 
@@ -257,7 +254,13 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 				case *influxql.SelectStatement:
 					log.Print("Sharding query: " + s.String())
-					selectedHost := hosts[rand.Intn(len(hosts))]
+
+					// TODO Find the chunk based on a shard key matching the query Option.
+					// TODO Get the replicaset hosts of the shard holding that shard
+					// TODO Select one of those hosts and pass on the query.
+
+					replicas := h.replicaSets[0].Replicas
+					selectedHost := replicas[rand.Intn(len(replicas))]
 					results, err, res := request(s, selectedHost.Location, h.client, r)
 					if err != nil {
 						passBack(&w, res)
@@ -271,8 +274,12 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					// However, the result should only be flushed after a response
 					// has been received from every shard and merged if needed.
 					// http://stackoverflow.com/questions/26769626/send-a-chunked-http-response-from-a-go-server
+					// Chunking with partial series works as well if grouping on time. If no grouping,
+					// then partial series can either be merged into one or just flushed individually.
 				}
 			}
+			// TODO replace with a custom ResultFlusher that can either save all
+			// results in memory and flushes in the end, or flushes every chunk received.
 			if len(allResults) > 0 {
 				respondWithResults(&w, allResults)
 				return
@@ -280,7 +287,8 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// This is the default handler.
-		selectedHost := hosts[rand.Intn(len(hosts))]
+		replicas := h.replicaSets[0].Replicas
+		selectedHost := replicas[rand.Intn(len(replicas))]
 		log.Print("Selected host " + selectedHost.Name + " at " + selectedHost.Location)
 		baseUrl, _ := url.Parse("http://" + selectedHost.Location + r.URL.Path)
 		baseUrl.RawQuery = r.URL.Query().Encode()

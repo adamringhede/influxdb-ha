@@ -30,12 +30,3 @@ name = "rs1"
     [[replicaSet.replica]]
         name = "data2"
         location = "192.168.99.100:7086"
-
-[[replicaSet]]
-name = "rs2"
-    [[replicaSet.replica]]
-        name = "data1"
-        location = "192.168.99.100:28086"
-    [[replicaSet.replica]]
-        name = "data2"
-        location = "192.168.99.100:27086"
