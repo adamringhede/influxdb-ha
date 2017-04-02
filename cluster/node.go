@@ -43,6 +43,19 @@ func NewLocalNode() *LocalNode {
 	return node
 }
 
+// Init creates new tokens with random position on the
+// ring given current all existing partitions to avoid conflicts and a more
+// uniform size.
+func (node *LocalNode) Init() error {
+	return errors.New("Not implemented")
+}
+
+// Join looks up local configuration and uses it to determine
+// if it should initiate with new tokens.
+func (node *LocalNode) Join() error {
+	return errors.New("Not implemented")
+}
+
 // Save stores its state in a local database.
 func (node *LocalNode) Save() error {
 	return errors.New("Not implemented")
