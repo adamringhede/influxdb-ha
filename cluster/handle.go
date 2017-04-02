@@ -41,6 +41,10 @@ func (h *Handle) Join(existing []string) error {
 	return nil
 }
 
+func (h *Handle) RemoveNode(name string) {
+
+}
+
 func (h *Handle) addMember(member *memberlist.Node) {
 	node := &Node{}
 	node.updateFromBytes(member.Meta)
@@ -65,6 +69,8 @@ func (e eventDelegate) NotifyJoin(member *memberlist.Node) {
 func (e eventDelegate) NotifyLeave(member *memberlist.Node) {
 	for i, node := range e.handle.Nodes {
 		if node.Name == member.Name {
+			node.Status = STATUS_REMOVED
+			// TODO Don't remove tokens until specifically told so.
 			e.handle.Nodes = append(e.handle.Nodes[:i], e.handle.Nodes[i+1:]...)
 			if e.handle.TokenDelegate != nil {
 				for _, token := range node.Tokens {
