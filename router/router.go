@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"bufio"
+	"github.com/influxdata/influxdb"
 )
 
 // Message represents a user-facing message to be included with the result.
@@ -267,6 +268,8 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						continue
 					}
 					allResults = append(allResults, results...)
+
+
 
 					// TODO
 					// if chunked=true, stream results to the response writer instead of
