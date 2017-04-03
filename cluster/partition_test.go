@@ -5,8 +5,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestPartitionCollection_Remove(t *testing.T) {
+	collection := NewPartitionCollection()
+	collection.Remove(4)
+	collection.Put(newPartition(4))
+	collection.Remove(4)
+}
+
 func TestPartitionCollection_Get(t *testing.T) {
 	collection := NewPartitionCollection()
+	assert.Nil(t, collection.Get(3))
+
 	collection.Put(newPartition(2))
 
 	assert.Equal(t, 2, collection.Get(3).Token)
@@ -15,6 +24,8 @@ func TestPartitionCollection_Get(t *testing.T) {
 
 func TestPartitionCollection_GetMultiple(t *testing.T) {
 	collection := NewPartitionCollection()
+	assert.Empty(t, collection.GetMultiple(0, 2))
+
 	collection.Put(newPartition(2))
 	collection.Put(newPartition(5))
 	collection.Put(newPartition(9))
