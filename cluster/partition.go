@@ -19,6 +19,10 @@ func NewPartitionCollection() *PartitionCollection {
 	return &PartitionCollection{avltree.NewWithIntComparator()}
 }
 
+func (c *PartitionCollection) Size() int {
+	return c.tree.Size()
+}
+
 func (c *PartitionCollection) Put(partition *Partition) {
 	c.tree.Put(partition.Token, partition)
 }

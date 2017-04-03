@@ -46,6 +46,13 @@ func TestPartitionCollection_GetMultiple(t *testing.T) {
 	assert.Equal(t, 2, res3[1].Token)
 }
 
+func TestPartitionCollection_Put(t *testing.T) {
+	collection := NewPartitionCollection()
+	collection.Put(newPartition(5))
+	collection.Put(newPartition(5))
+	assert.Equal(t, 1, collection.Size())
+}
+
 func newPartition(token int) *Partition {
 	return &Partition{token, &Node{}}
 }
