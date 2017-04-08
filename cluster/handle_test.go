@@ -5,7 +5,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestCompareSlices(t *testing.T) {
+func Test_compareIntSlices(t *testing.T) {
 	a := []int{1,2}
 	b := []int{2,3}
 	adiff, bdiff := compareIntSlices(a,b)

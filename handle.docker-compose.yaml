@@ -1,0 +1,29 @@
+version: '2'
+services:
+  influxdb-handle:
+    build:
+      context: ./
+      dockerfile: Dockerfile_handle
+    image: influxdb-ha/handle
+    ports:
+      - "8084:8084"
+    entrypoint: bin/handle
+    hostname: influxdb-handle
+  influxdb-handle2:
+    image: influxdb-ha/handle
+    ports:
+      - "8184:8184"
+    hostname: influxdb-handle2
+    depends_on:
+      - influxdb-handle
+    entrypoint: bin/handle
+    command: -join "influxdb-handle:8084" -port 8184
+  influxdb-handle3:
+    image: influxdb-ha/handle
+    ports:
+      - "8284:8284"
+    hostname: influxdb-handle3
+    depends_on:
+      - influxdb-handle
+    entrypoint: bin/handle
+    command: -join "influxdb-handle:8084" -port 8284

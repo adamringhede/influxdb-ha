@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"bufio"
-	"github.com/influxdata/influxdb"
 )
 
 // Message represents a user-facing message to be included with the result.

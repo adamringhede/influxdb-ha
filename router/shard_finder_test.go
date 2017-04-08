@@ -18,12 +18,10 @@ func getSelectStatements(statements influxql.Statements) (result []*influxql.Sel
 
 func TestFindShard(t *testing.T) {
 
-	//queryParams := "SELECT \"value\" FROM \"cpu_load_short\" WHERE \"region\"=1 AND (\"region\"!='us-west' AND \"host\"='server01'); SELECT * FROM test"
-	queryParams := `SELET * FROM (SELECT "active" / "total" FROM "mem" WHERE "region"='us-west' AND time > now() - 2m GROUP BY *)`
+	queryParams := "SELECT \"value\" FROM \"cpu_load_short\" WHERE \"region\"=1 AND (\"region\"!='us-west' AND \"host\"='server01'); SELECT * FROM test"
+	//queryParams := `SELET * FROM (SELECT "active" / "total" FROM "mem" WHERE "region"='us-west' AND time > now() - 2m GROUP BY *)`
 	//queryParams := `SELECT BOTTOM("water_level",3), MEAN("water_level") / SUM("water_level") FROM "h2o_feet"`
 	q, parseErr := influxql.ParseQuery(queryParams)
-	ers := string(parseErr.Error())
-	log.Print(ers)
 	if parseErr != nil {
 		log.Panic(parseErr)
 	}
