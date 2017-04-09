@@ -19,6 +19,7 @@ type Handle struct {
 	list		*memberlist.Memberlist
 	Nodes		map[string]*Node
 	TokenDelegate	*TokenDelegate
+	LocalNode	*LocalNode
 }
 
 func NewHandle(config Config) (*Handle, error) {
@@ -43,6 +44,7 @@ func NewHandle(config Config) (*Handle, error) {
 	return handle, nil
 }
 
+// Join connects to one or more seed nodes to join the cluster.
 func (h *Handle) Join(existing []string) error {
 	_, err := h.list.Join(existing)
 	if err != nil {
@@ -52,6 +54,17 @@ func (h *Handle) Join(existing []string) error {
 		h.addMember(member)
 	}
 	return nil
+}
+
+func (h *Handle) createLocalNode() {
+	h.LocalNode = NewLocalNode()
+	h.LocalNode.Init()
+	// load data from config
+	// if there are no tokens, look in a local config file for initial_tokens
+	// if there are none there either, create new ones. 256 are created by default.
+	// the number of tokens i also configurable. in a heterogeneous cluster, using
+	// different number of tokens per server is needed to more evenly balance the load.
+
 }
 
 func (h *Handle) RemoveNode(name string) {

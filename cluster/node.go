@@ -4,6 +4,7 @@ import (
 	"errors"
 	"encoding/gob"
 	"bytes"
+	"math/rand"
 )
 
 const (
@@ -35,6 +36,7 @@ func (node *Node) updateFromBytes(data []byte) error {
 
 type LocalNode struct {
 	Node
+	storage	localStorage
 }
 
 func NewLocalNode() *LocalNode {
@@ -49,7 +51,24 @@ func NewLocalNode() *LocalNode {
 // ring given current all existing partitions to avoid conflicts and a more
 // uniform size.
 func (node *LocalNode) Init() error {
-	return errors.New("Not implemented")
+	data, err := node.storage.get()
+	if err != nil {
+		return err
+	}
+	if len(data.Tokens) == 0 {
+		data.Tokens = generateTokens(256)
+		node.storage.save(data)
+	}
+	node.Tokens = data.Tokens
+	return nil
+}
+
+func generateTokens(count int) []int {
+	tokens := []int{}
+	for i := 0; i < count; i++ {
+		tokens = append(tokens, int(rand.Int31()))
+	}
+	return tokens
 }
 
 // Join looks up local configuration and uses it to determine
@@ -61,6 +80,15 @@ func (node *LocalNode) Join() error {
 // Save stores its state in a local database.
 func (node *LocalNode) Save() error {
 	return errors.New("Not implemented")
+}
+
+type localStorage interface {
+	get() (persistentState, error)
+	save(state persistentState) error
+}
+
+type persistentState struct {
+	Tokens	[]int
 }
 
 type meta struct {
