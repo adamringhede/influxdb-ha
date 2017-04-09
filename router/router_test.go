@@ -1,14 +1,14 @@
 package router_test
 
 import (
-	"testing"
-	"github.com/adamringhede/influxdb-ha/router"
-	"net/http"
-	"log"
-	"github.com/stretchr/testify/assert"
-	"net/url"
 	"encoding/json"
+	"github.com/adamringhede/influxdb-ha/router"
 	"github.com/influxdata/influxdb/models"
+	"github.com/stretchr/testify/assert"
+	"log"
+	"net/http"
+	"net/url"
+	"testing"
 	"time"
 )
 
@@ -27,7 +27,7 @@ type Result struct {
 }
 
 type Response struct {
-	Results	[]Result	`json:"results"`
+	Results []Result `json:"results"`
 }
 
 var client = &http.Client{Timeout: 120 * time.Second}
@@ -44,7 +44,7 @@ func TestRouting(t *testing.T) {
 	go router.Start(&config.Routers[0], config.ReplicaSets)
 	//q := "SELECT \"value\" FROM \"cpu_load_short\" WHERE \"region\"='us-west' AND \"host\"='server01'"
 	q := `select * from cpu_load_short GROUP BY *`
-	values, _ := url.ParseQuery("chunked=true&db=r&q="+q)
+	values, _ := url.ParseQuery("chunked=true&db=r&q=" + q)
 	query := values.Encode()
 	resp, err := client.Get("http://localhost:5096/query?" + query)
 	if err != nil {

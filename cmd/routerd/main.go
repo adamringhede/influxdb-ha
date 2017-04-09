@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/adamringhede/influxdb-ha/router"
 	"flag"
+	"github.com/adamringhede/influxdb-ha/router"
 	"log"
 )
 
@@ -17,25 +17,25 @@ func main() {
 	if err != nil {
 		log.Panic(err)
 	}
-/*
-	if len(config.Routers) == 0 {
-		log.Panic(errors.New("Configuration requires at least one router."))
-	}
+	/*
+		if len(config.Routers) == 0 {
+			log.Panic(errors.New("Configuration requires at least one router."))
+		}
 
-	var routerConfig *router.RouterConfig
-	if *routerName != "" {
-		for _, r := range config.Routers {
-			if r.Name == *routerName {
-				routerConfig = &r
-				break
+		var routerConfig *router.RouterConfig
+		if *routerName != "" {
+			for _, r := range config.Routers {
+				if r.Name == *routerName {
+					routerConfig = &r
+					break
+				}
 			}
-		}
-		if routerConfig == nil {
-			log.Panic("Could not find router with name " + *routerName)
-		}
-	} else {
-		routerConfig = &config.Routers[0]
-	}*/
+			if routerConfig == nil {
+				log.Panic("Could not find router with name " + *routerName)
+			}
+		} else {
+			routerConfig = &config.Routers[0]
+		}*/
 	routerConfig := &config.Routers[0]
 	log.Printf("Starting router: %s", routerConfig.Name)
 

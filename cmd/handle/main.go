@@ -1,11 +1,11 @@
 package main
 
 import (
-	"github.com/adamringhede/influxdb-ha/cluster"
 	"flag"
-	"strings"
-	"os"
+	"github.com/adamringhede/influxdb-ha/cluster"
 	"log"
+	"os"
+	"strings"
 )
 
 func main() {
@@ -45,5 +45,3 @@ func main() {
 	<-ch
 
 }
-
-

@@ -25,10 +25,14 @@ func Bool(b bool) uint32 {
 
 func Any(d interface{}) uint32 {
 	switch v := d.(type) {
-	case int: return Int(v)
-	case float64: return Float(v)
-	case bool: return Bool(v)
-	case string: return String(v)
+	case int:
+		return Int(v)
+	case float64:
+		return Float(v)
+	case bool:
+		return Bool(v)
+	case string:
+		return String(v)
 	default:
 		return 0
 	}

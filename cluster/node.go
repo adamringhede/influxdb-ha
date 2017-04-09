@@ -1,9 +1,9 @@
 package cluster
 
 import (
-	"errors"
-	"encoding/gob"
 	"bytes"
+	"encoding/gob"
+	"errors"
 	"math/rand"
 )
 
@@ -15,10 +15,10 @@ const (
 )
 
 type Node struct {
-	Tokens		[]int
-	Status		int
-	DataLocation	string
-	Name 		string
+	Tokens       []int
+	Status       int
+	DataLocation string
+	Name         string
 }
 
 func (node *Node) updateFromBytes(data []byte) error {
@@ -36,7 +36,7 @@ func (node *Node) updateFromBytes(data []byte) error {
 
 type LocalNode struct {
 	Node
-	storage	localStorage
+	storage localStorage
 }
 
 func NewLocalNode() *LocalNode {
@@ -92,11 +92,11 @@ type localStorage interface {
 }
 
 type persistentState struct {
-	Tokens	[]int
+	Tokens []int
 }
 
 type meta struct {
-	Tokens		[]int
-	Status		int
-	DataLocation	string
+	Tokens       []int
+	Status       int
+	DataLocation string
 }

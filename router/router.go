@@ -1,19 +1,19 @@
 package router
 
 import (
-	"net/http"
-	"log"
-	"io"
-	"net/url"
-	"math/rand"
-	"time"
-	"github.com/influxdata/influxdb/influxql"
-	"github.com/influxdata/influxdb-relay/relay"
-	"fmt"
-	"github.com/influxdata/influxdb/models"
+	"bufio"
 	"encoding/json"
 	"errors"
-	"bufio"
+	"fmt"
+	"github.com/influxdata/influxdb-relay/relay"
+	"github.com/influxdata/influxdb/influxql"
+	"github.com/influxdata/influxdb/models"
+	"io"
+	"log"
+	"math/rand"
+	"net/http"
+	"net/url"
+	"time"
 )
 
 // Message represents a user-facing message to be included with the result.
@@ -31,7 +31,7 @@ type result struct {
 }
 
 type response struct {
-	Results	[]result	`json:"results"`
+	Results []result `json:"results"`
 }
 
 func parseResp(resp *http.Response, chunked bool) response {
@@ -82,7 +82,7 @@ func respondWithResults(w *http.ResponseWriter, results []result) {
 
 func handleRouteError(target string, err error) {
 	if err != nil {
-		log.Fatal("route " + target + ": ", err)
+		log.Fatal("route "+target+": ", err)
 	}
 }
 
@@ -108,10 +108,11 @@ type Resolver interface {
 	GetDataNodes()
 }
 type HTTPHandler struct {
-	client 		*http.Client
-	config 		*RouterConfig
-	replicaSets 	[]ReplicaSet
+	client      *http.Client
+	config      *RouterConfig
+	replicaSets []ReplicaSet
 }
+
 func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	/*buf, err := ioutil.ReadAll(r.Body)
 	if err != nil {
@@ -150,12 +151,12 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			allResults := []result{}
 			q, parseErr := influxql.ParseQuery(r.URL.Query()["q"][0])
 			if parseErr != nil {
-				jsonError(w, http.StatusBadRequest, "error parsing query: " + parseErr.Error())
+				jsonError(w, http.StatusBadRequest, "error parsing query: "+parseErr.Error())
 				return
 			}
 			for _, stmt := range q.Statements {
 				switch s := stmt.(type) {
-				case 	*influxql.CreateContinuousQueryStatement,
+				case *influxql.CreateContinuousQueryStatement,
 					*influxql.CreateDatabaseStatement,
 					*influxql.CreateRetentionPolicyStatement,
 					*influxql.CreateSubscriptionStatement,
@@ -195,8 +196,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 
-
-				case 	*influxql.DropShardStatement,
+				case *influxql.DropShardStatement,
 					*influxql.KillQueryStatement,
 					*influxql.ShowShardGroupsStatement,
 					*influxql.ShowShardsStatement,
@@ -204,10 +204,10 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					*influxql.ShowDiagnosticsStatement:
 
 					// Not supported. Client must connect to the individual data node.
-					jsonError(w, 400, "Statement is not supported on router: " + s.String())
+					jsonError(w, 400, "Statement is not supported on router: "+s.String())
 					return
 
-				case	*influxql.ShowContinuousQueriesStatement,
+				case *influxql.ShowContinuousQueriesStatement,
 					*influxql.ShowGrantsForUserStatement,
 					*influxql.ShowDatabasesStatement,
 					*influxql.ShowFieldKeysStatement,
@@ -230,7 +230,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						break
 					}
 
-				case	*influxql.ShowMeasurementsStatement,
+				case *influxql.ShowMeasurementsStatement,
 					*influxql.ShowSeriesStatement,
 					*influxql.ShowTagValuesStatement,
 					*influxql.ShowQueriesStatement:
@@ -268,8 +268,6 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					}
 					allResults = append(allResults, results...)
 
-
-
 					// TODO
 					// if chunked=true, stream results to the response writer instead of
 					// accumulating all of them and waiting until last is done.
@@ -299,7 +297,6 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		passBack(&w, res)
 	}
 }
-
 
 func Start(config *RouterConfig, replicaSets []ReplicaSet) {
 	addr := ":5096"

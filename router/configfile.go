@@ -1,21 +1,21 @@
 package router
 
 import (
+	"errors"
 	"github.com/BurntSushi/toml"
 	"io/ioutil"
-	"errors"
 )
 
 type node struct {
-	Name		string	`toml:"name"`
-	Location	string	`toml:"location"`
+	Name     string `toml:"name"`
+	Location string `toml:"location"`
 }
 
 type RouterConfig struct {
-	Name		string
-	BindAddr	string	`toml:"bind-addr"`
-	Relays		[]node	`toml:"relays"`
-	Data		[]node	`toml:"dbs"`
+	Name     string
+	BindAddr string `toml:"bind-addr"`
+	Relays   []node `toml:"relays"`
+	Data     []node `toml:"dbs"`
 }
 
 func (r *RouterConfig) Validate() error {
@@ -29,13 +29,13 @@ func (r *RouterConfig) Validate() error {
 }
 
 type ReplicaSet struct {
-	Name		string 	`toml:"name"`
-	Replicas	[]node	`toml:"replica"`
+	Name     string `toml:"name"`
+	Replicas []node `toml:"replica"`
 }
 
 type FileConfig struct {
-	Routers 	[]RouterConfig	`toml:"router"`
-	ReplicaSets 	[]ReplicaSet	`toml:"replicaSet"`
+	Routers     []RouterConfig `toml:"router"`
+	ReplicaSets []ReplicaSet   `toml:"replicaSet"`
 }
 
 func ParseConfigFile(filename string) (FileConfig, error) {

@@ -1,8 +1,8 @@
 package cluster
 
 import (
-	"testing"
 	"log"
+	"testing"
 )
 
 func TestJoin(t *testing.T) {

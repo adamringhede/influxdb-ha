@@ -10,7 +10,7 @@ const (
 // so that it can potentially be replaced to support
 // a different one.
 type Resolver struct {
-	collection	*PartitionCollection
+	collection *PartitionCollection
 }
 
 func NewResolver() *Resolver {
@@ -30,7 +30,7 @@ func (r *Resolver) FindByKey(key int, purpose int) []string {
 
 func (r *Resolver) FindAll() []string {
 	locations := []string{}
-	for _, value := range r.collection.tree.Values(){
+	for _, value := range r.collection.tree.Values() {
 		locations = append(locations, value.(*Partition).Node.DataLocation)
 	}
 	return locations

@@ -1,9 +1,9 @@
 package cluster
 
 import (
-	"testing"
-	"os"
 	"github.com/stretchr/testify/assert"
+	"os"
+	"testing"
 )
 
 func TestCreateNodeWithStorage(t *testing.T) {

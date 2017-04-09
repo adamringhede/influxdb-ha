@@ -5,14 +5,14 @@ import (
 )
 
 type Partition struct {
-	Token	int
-	Node	*Node
+	Token int
+	Node  *Node
 }
 
 // PartitionCollection is for partition look ups
 // backed by an AVL-tree
 type PartitionCollection struct {
-	tree 	*avltree.Tree
+	tree *avltree.Tree
 }
 
 func NewPartitionCollection() *PartitionCollection {

@@ -3,8 +3,8 @@ package router
 import "github.com/influxdata/influxdb/influxql"
 
 type tagFinder struct {
-	tags	map[string]bool
-	values	map[string][]string // it could be interface to allow for numerical values as well
+	tags   map[string]bool
+	values map[string][]string // it could be interface to allow for numerical values as well
 }
 
 func (f *tagFinder) putValue(key string, value interface{}) {
@@ -13,7 +13,8 @@ func (f *tagFinder) putValue(key string, value interface{}) {
 		f.values[key] = []string{}
 	}
 	switch v := value.(type) {
-	case *influxql.StringLiteral: f.values[key] = append(f.values[key], v.Val)
+	case *influxql.StringLiteral:
+		f.values[key] = append(f.values[key], v.Val)
 	}
 
 }
@@ -21,7 +22,8 @@ func (f *tagFinder) putValue(key string, value interface{}) {
 func (f *tagFinder) findTags(cond influxql.Expr) {
 	// if op isn't 22 or 23, then it is some equality operation.
 	switch expr := cond.(type) {
-	case *influxql.ParenExpr: f.findTags(expr.Expr)
+	case *influxql.ParenExpr:
+		f.findTags(expr.Expr)
 	case *influxql.BinaryExpr:
 		if expr.Op == influxql.AND || expr.Op == influxql.OR {
 			f.findTags(expr.LHS)
@@ -30,9 +32,9 @@ func (f *tagFinder) findTags(cond influxql.Expr) {
 			tagKey := expr.LHS.(*influxql.VarRef).Val
 
 			/*
-			TODO greater than and less than operators could also work here to limit
-			the number of shards that need to be queried.
-			 */
+				TODO greater than and less than operators could also work here to limit
+				the number of shards that need to be queried.
+			*/
 			if expr.Op == influxql.EQ {
 				current, ok := f.tags[tagKey]
 				if !ok || current != false {

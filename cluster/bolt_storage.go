@@ -1,9 +1,9 @@
 package cluster
 
 import (
-	"github.com/boltdb/bolt"
 	"encoding/json"
 	"fmt"
+	"github.com/boltdb/bolt"
 	"os"
 	"path/filepath"
 )
@@ -11,7 +11,7 @@ import (
 const bucketName = "influxdbClusterNodeStorage"
 
 type boltStorage struct {
-	db	*bolt.DB
+	db *bolt.DB
 }
 
 func (s *boltStorage) save(state persistentState) error {

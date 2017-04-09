@@ -11,9 +11,9 @@ type TokenDelegate interface {
 }
 
 type Config struct {
-	BindAddr	string
-	BindPort	int
-	MetaFilename	string
+	BindAddr     string
+	BindPort     int
+	MetaFilename string
 }
 
 func (c Config) SetDefaults() {
@@ -26,11 +26,11 @@ func (c Config) SetDefaults() {
 }
 
 type Handle struct {
-	list		*memberlist.Memberlist
-	Nodes		map[string]*Node
-	TokenDelegate	*TokenDelegate
-	LocalNode	*LocalNode
-	Config		Config
+	list          *memberlist.Memberlist
+	Nodes         map[string]*Node
+	TokenDelegate *TokenDelegate
+	LocalNode     *LocalNode
+	Config        Config
 }
 
 func NewHandle(config Config) (*Handle, error) {
@@ -107,7 +107,7 @@ func (h *Handle) addMember(member *memberlist.Node) {
 }
 
 type eventDelegate struct {
-	handle	*Handle
+	handle *Handle
 }
 
 func (e eventDelegate) NotifyJoin(member *memberlist.Node) {

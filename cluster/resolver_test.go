@@ -1,8 +1,8 @@
 package cluster
 
 import (
-	"testing"
 	"github.com/stretchr/testify/assert"
+	"testing"
 )
 
 func TestResolver_FindAll(t *testing.T) {
