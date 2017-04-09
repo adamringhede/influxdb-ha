@@ -30,7 +30,8 @@ func (s *boltStorage) get() (persistentState, error) {
 	err := s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucketName))
 		b.Get([]byte("state"))
-		return json.Unmarshal(b.Get([]byte("state")), &state)
+		json.Unmarshal(b.Get([]byte("state")), &state)
+		return nil
 	})
 	return state, err
 }

@@ -45,7 +45,11 @@ func NewLocalNode() *LocalNode {
 	return node
 }
 
-// TODO Add method to notify cluster about change in tokens
+func CreateNodeWithStorage(storage localStorage) *LocalNode {
+	node := NewLocalNode()
+	node.storage = storage
+	return node
+}
 
 // Init creates new tokens with random position on the
 // ring given current all existing partitions to avoid conflicts and a more
