@@ -4,6 +4,8 @@ import (
 	"github.com/boltdb/bolt"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 )
 
 const bucketName = "influxdbClusterNodeStorage"
@@ -37,6 +39,9 @@ func (s *boltStorage) get() (persistentState, error) {
 }
 
 func openBoltStorage(filename string) (*boltStorage, error) {
+	// Ensure path to file exists
+	os.MkdirAll(filepath.Dir(filename), os.ModePerm)
+
 	db, err := bolt.Open(filename, 0600, nil)
 	if err != nil {
 		return &boltStorage{}, err

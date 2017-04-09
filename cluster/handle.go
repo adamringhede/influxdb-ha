@@ -13,6 +13,16 @@ type TokenDelegate interface {
 type Config struct {
 	BindAddr	string
 	BindPort	int
+	MetaFilename	string
+}
+
+func (c Config) SetDefaults() {
+	if c.BindPort == 0 {
+		c.BindPort = 18086
+	}
+	if c.MetaFilename == "" {
+		c.MetaFilename = "/var/opt/influxdb-ha/meta"
+	}
 }
 
 type Handle struct {
@@ -20,11 +30,18 @@ type Handle struct {
 	Nodes		map[string]*Node
 	TokenDelegate	*TokenDelegate
 	LocalNode	*LocalNode
+	Config		Config
 }
 
 func NewHandle(config Config) (*Handle, error) {
 	handle := &Handle{}
+	config.SetDefaults()
+	handle.Config = config
 	handle.Nodes = make(map[string]*Node)
+	nodeErr := handle.createLocalNode(config)
+	if nodeErr != nil {
+		return handle, nodeErr
+	}
 
 	conf := memberlist.DefaultWANConfig()
 	conf.Events = eventDelegate{handle}
@@ -56,19 +73,21 @@ func (h *Handle) Join(existing []string) error {
 	return nil
 }
 
-func (h *Handle) createLocalNode() {
-	h.LocalNode = NewLocalNode()
-	h.LocalNode.Init()
-	// load data from config
-	// if there are no tokens, look in a local config file for initial_tokens
-	// if there are none there either, create new ones. 256 are created by default.
-	// the number of tokens i also configurable. in a heterogeneous cluster, using
-	// different number of tokens per server is needed to more evenly balance the load.
-
+func (h *Handle) createLocalNode(config Config) error {
+	filePath := config.MetaFilename
+	if filePath == "" {
+		filePath = "/var/opt/influxdb-ha/meta"
+	}
+	storage, err := openBoltStorage(filePath)
+	if err != nil {
+		return err
+	}
+	h.LocalNode = CreateNodeWithStorage(storage)
+	return h.LocalNode.Init()
 }
 
 func (h *Handle) RemoveNode(name string) {
-
+	panic("Not implemented")
 }
 
 func (h *Handle) addMember(member *memberlist.Node) {

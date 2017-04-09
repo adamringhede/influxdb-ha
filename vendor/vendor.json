@@ -15,6 +15,12 @@
 			"revisionTime": "2015-12-31T01:07:39Z"
 		},
 		{
+			"checksumSHA1": "Vw77VGlwiPNNoCPc+lKVeQWcKK4=",
+			"path": "github.com/boltdb/bolt",
+			"revision": "4b1ebc1869ad66568b313d0dc410e2be72670dda",
+			"revisionTime": "2016-10-28T19:36:45Z"
+		},
+		{
 			"checksumSHA1": "dvabztWVQX8f6oMLRyv4dLH+TGY=",
 			"path": "github.com/davecgh/go-spew/spew",
 			"revision": "346938d642f2ec3594ed81d874461961cd0faa76",
