@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"encoding/json"
 	"github.com/hashicorp/memberlist"
 	"log"
 )
@@ -18,7 +19,7 @@ type Config struct {
 
 func (c Config) SetDefaults() {
 	if c.BindPort == 0 {
-		c.BindPort = 18086
+		c.BindPort = 8084
 	}
 	if c.MetaFilename == "" {
 		c.MetaFilename = "/var/opt/influxdb-ha/meta"
@@ -28,7 +29,7 @@ func (c Config) SetDefaults() {
 type Handle struct {
 	list          *memberlist.Memberlist
 	Nodes         map[string]*Node
-	TokenDelegate *TokenDelegate
+	TokenDelegate TokenDelegate
 	LocalNode     *LocalNode
 	Config        Config
 }
@@ -45,11 +46,12 @@ func NewHandle(config Config) (*Handle, error) {
 
 	conf := memberlist.DefaultWANConfig()
 	conf.Events = eventDelegate{handle}
+	conf.Delegate = nodeDelegate{handle}
 	conf.BindAddr = config.BindAddr
 	if config.BindPort != 0 {
 		conf.BindPort = config.BindPort
 	} else {
-		conf.BindPort = 18086
+		conf.BindPort = 8084
 	}
 	log.Printf("[Cluster] Listening on %s:%d", conf.BindAddr, conf.BindPort)
 	list, err := memberlist.Create(conf)
@@ -57,7 +59,7 @@ func NewHandle(config Config) (*Handle, error) {
 		return handle, err
 	}
 	handle.list = list
-
+	handle.addMember(list.LocalNode())
 	return handle, nil
 }
 
@@ -73,6 +75,33 @@ func (h *Handle) Join(existing []string) error {
 	return nil
 }
 
+type nodeUpdate struct {
+	Name   string
+	Tokens []int
+}
+
+func (h *Handle) BroadcastTokens() error {
+	local := h.list.LocalNode()
+	data, err := json.Marshal(nodeUpdate{
+		h.LocalNode.Name,
+		h.LocalNode.Tokens,
+	})
+	if err != nil {
+		return err
+	}
+	var sendErr error
+	// TODO send updates concurrently
+	for _, member := range h.list.Members() {
+		if member.Name != local.Name {
+			sendErr = h.list.SendReliable(member, data)
+			if sendErr != nil {
+				log.Printf("[Cluster] Failed to send update to %s at %s", member.Name, member.Addr.String())
+			}
+		}
+	}
+	return sendErr
+}
+
 func (h *Handle) createLocalNode(config Config) error {
 	filePath := config.MetaFilename
 	if filePath == "" {
@@ -83,6 +112,7 @@ func (h *Handle) createLocalNode(config Config) error {
 		return err
 	}
 	h.LocalNode = CreateNodeWithStorage(storage)
+	h.LocalNode.DataLocation = "0.0.0.0:18086"
 	return h.LocalNode.Init()
 }
 
@@ -95,12 +125,13 @@ func (h *Handle) addMember(member *memberlist.Node) {
 		node := &Node{}
 		node.updateFromBytes(member.Meta)
 		node.Name = member.Name
+		node.DataLocation = member.Addr.String() + ":18086"
 		// the resolver needs to be aware of new tokens.
 		h.Nodes[member.Name] = node
 		log.Printf("[Cluster] Added cluster member %s", member.Name)
 		if h.TokenDelegate != nil {
 			for _, token := range node.Tokens {
-				(*h.TokenDelegate).NotifyNewToken(token, node)
+				h.TokenDelegate.NotifyNewToken(token, node)
 			}
 		}
 	}
@@ -112,6 +143,16 @@ type eventDelegate struct {
 
 func (e eventDelegate) NotifyJoin(member *memberlist.Node) {
 	e.handle.addMember(member)
+	if member.Name == e.handle.LocalNode.Name {
+		return
+	}
+	data, err := json.Marshal(nodeUpdate{
+		e.handle.LocalNode.Name,
+		e.handle.LocalNode.Tokens})
+	if err != nil {
+		panic(err)
+	}
+	e.handle.list.SendReliable(member, data)
 }
 
 func (e eventDelegate) NotifyLeave(member *memberlist.Node) {
@@ -122,7 +163,7 @@ func (e eventDelegate) NotifyLeave(member *memberlist.Node) {
 		delete(e.handle.Nodes, member.Name)
 		if e.handle.TokenDelegate != nil {
 			for _, token := range node.Tokens {
-				(*e.handle.TokenDelegate).NotifyRemovedToken(token, node)
+				e.handle.TokenDelegate.NotifyRemovedToken(token, node)
 			}
 		}
 	}
@@ -137,13 +178,87 @@ func (e eventDelegate) NotifyUpdate(member *memberlist.Node) {
 		removed, added := compareIntSlices(oldTokens, newTokens)
 		if e.handle.TokenDelegate != nil {
 			for _, token := range removed {
-				(*e.handle.TokenDelegate).NotifyRemovedToken(token, node)
+				e.handle.TokenDelegate.NotifyRemovedToken(token, node)
 			}
 			for _, token := range added {
-				(*e.handle.TokenDelegate).NotifyNewToken(token, node)
+				e.handle.TokenDelegate.NotifyNewToken(token, node)
 			}
 		}
 	}
+}
+
+type nodeDelegate struct {
+	handle *Handle
+}
+
+// NodeMeta is used to retrieve meta-data about the current node
+// when broadcasting an alive message. It's length is limited to
+// the given byte size. This metadata is available in the Node structure.
+func (d nodeDelegate) NodeMeta(limit int) []byte {
+	// TODO get necessary data about the node like influxdb port
+	return []byte{}
+}
+
+// NotifyMsg is called when a user-data message is received.
+// Care should be taken that this method does not block, since doing
+// so would block the entire UDP packet receive loop. Additionally, the byte
+// slice may be modified after the call returns, so it should be copied if needed
+func (d nodeDelegate) NotifyMsg(msg []byte) {
+	// TODO handle remove node, or handle it in node updates
+	var update nodeUpdate
+	err := json.Unmarshal(msg, &update)
+	if err != nil {
+		log.Print(err)
+	} else {
+		var node *Node
+		if _, ok := d.handle.Nodes[update.Name]; !ok {
+			log.Printf("[Cluster] Missing node with name %s. Creating a new node.", update.Name)
+			node = &Node{}
+			node.Name = update.Name
+			d.handle.Nodes[node.Name] = node
+		} else {
+			node = d.handle.Nodes[update.Name]
+		}
+		if len(update.Tokens) != 0 {
+			log.Printf("[Cluster] Received update from %s", node.Name)
+			removed, added := compareIntSlices(node.Tokens, update.Tokens)
+			if d.handle.TokenDelegate != nil {
+				for _, token := range removed {
+					d.handle.TokenDelegate.NotifyRemovedToken(token, node)
+				}
+				for _, token := range added {
+					d.handle.TokenDelegate.NotifyNewToken(token, node)
+				}
+			}
+			node.Tokens = update.Tokens
+		}
+	}
+}
+
+// GetBroadcasts is called when user data messages can be broadcast.
+// It can return a list of buffers to send. Each buffer should assume an
+// overhead as provided with a limit on the total byte size allowed.
+// The total byte size of the resulting data to send must not exceed
+// the limit. Care should be taken that this method does not block,
+// since doing so would block the entire UDP packet receive loop.
+func (d nodeDelegate) GetBroadcasts(overhead, limit int) [][]byte {
+	return [][]byte{}
+}
+
+// LocalState is used for a TCP Push/Pull. This is sent to
+// the remote side in addition to the membership information. Any
+// data can be sent here. See MergeRemoteState as well. The `join`
+// boolean indicates this is for a join instead of a push/pull.
+func (d nodeDelegate) LocalState(join bool) []byte {
+	return []byte{}
+}
+
+// MergeRemoteState is invoked after a TCP Push/Pull. This is the
+// state received from the remote side and is the result of the
+// remote side's LocalState call. The 'join'
+// boolean indicates this is for a join instead of a push/pull.
+func (d nodeDelegate) MergeRemoteState(buf []byte, join bool) {
+
 }
 
 func compareIntSlices(a []int, b []int) ([]int, []int) {

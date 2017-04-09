@@ -9,6 +9,12 @@ type Partition struct {
 	Node  *Node
 }
 
+type PartitionKey struct {
+	Database    string
+	Measurement string
+	Tags        []string
+}
+
 // PartitionCollection is for partition look ups
 // backed by an AVL-tree
 type PartitionCollection struct {

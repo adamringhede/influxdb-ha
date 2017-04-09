@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"errors"
 	"math/rand"
+	"os"
 )
 
 const (
@@ -23,8 +24,12 @@ type Node struct {
 
 func (node *Node) updateFromBytes(data []byte) error {
 	buf := bytes.NewBuffer(data)
-	m := &meta{}
-	err := gob.NewDecoder(buf).Decode(m)
+	var m struct {
+		Tokens       []int
+		Status       int
+		DataLocation string
+	}
+	err := gob.NewDecoder(buf).Decode(&m)
 	if err != nil {
 		return err
 	}
@@ -34,20 +39,31 @@ func (node *Node) updateFromBytes(data []byte) error {
 	return nil
 }
 
+type ClusterMeta struct {
+	PartitionKeys []PartitionKey
+}
+
 type LocalNode struct {
 	Node
+	Meta    ClusterMeta
 	storage localStorage
 }
 
 func NewLocalNode() *LocalNode {
 	node := &LocalNode{}
 	node.Status = STATUS_IDLE
+	node.Meta = ClusterMeta{}
 	return node
 }
 
 func CreateNodeWithStorage(storage localStorage) *LocalNode {
 	node := NewLocalNode()
 	node.storage = storage
+	hostname, nameErr := os.Hostname()
+	if nameErr != nil {
+		panic(nameErr)
+	}
+	node.Name = hostname
 	return node
 }
 
@@ -64,6 +80,8 @@ func (node *LocalNode) Init() error {
 		node.storage.save(data)
 	}
 	node.Tokens = data.Tokens
+	node.Meta.PartitionKeys = data.PartitionKeys
+	node.Status = STATUS_UP
 	return nil
 }
 
@@ -83,7 +101,11 @@ func (node *LocalNode) Join() error {
 
 // Save stores its state in a local database.
 func (node *LocalNode) Save() error {
-	return errors.New("Not implemented")
+	state := persistentState{
+		node.Tokens,
+		node.Meta.PartitionKeys,
+	}
+	return node.storage.save(state)
 }
 
 type localStorage interface {
@@ -92,11 +114,6 @@ type localStorage interface {
 }
 
 type persistentState struct {
-	Tokens []int
-}
-
-type meta struct {
-	Tokens       []int
-	Status       int
-	DataLocation string
+	Tokens        []int
+	PartitionKeys []PartitionKey
 }

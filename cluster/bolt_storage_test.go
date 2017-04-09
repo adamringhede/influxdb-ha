@@ -14,7 +14,8 @@ func TestBoltStorage(t *testing.T) {
 	storage, openErr := openBoltStorage(testFileName)
 	assert.NoError(t, openErr)
 
-	saveErr := storage.save(persistentState{[]int{1, 2, 3}})
+	saveErr := storage.save(persistentState{
+		[]int{1, 2, 3}, []PartitionKey{}})
 	assert.NoError(t, saveErr)
 
 	state, getErr := storage.get()

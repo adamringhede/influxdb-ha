@@ -7,23 +7,27 @@ services:
     image: influxdb-ha/handle
     ports:
       - "8084:8084"
+      - "8086:8086"
     entrypoint: bin/handle
     hostname: influxdb-handle
+    command: -port 8084 -client-port 8086
   influxdb-handle2:
     image: influxdb-ha/handle
     ports:
       - "8184:8184"
+      - "8186:8186"
     hostname: influxdb-handle2
     depends_on:
       - influxdb-handle
     entrypoint: bin/handle
-    command: -join "influxdb-handle:8084" -port 8184
+    command: -join "influxdb-handle:8084" -port 8184 -client-port 8186
   influxdb-handle3:
     image: influxdb-ha/handle
     ports:
       - "8284:8284"
+      - "8286:8286"
     hostname: influxdb-handle3
     depends_on:
       - influxdb-handle
     entrypoint: bin/handle
-    command: -join "influxdb-handle:8084" -port 8284
+    command: -join "influxdb-handle:8084" -port 8284 -client-port 8286
