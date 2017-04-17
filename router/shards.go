@@ -13,6 +13,8 @@ func (f *tagFinder) putValue(key string, value interface{}) {
 		f.values[key] = []string{}
 	}
 	switch v := value.(type) {
+	case *influxql.VarRef:
+		f.values[key] = append(f.values[key], v.Val)
 	case *influxql.StringLiteral:
 		f.values[key] = append(f.values[key], v.Val)
 	}

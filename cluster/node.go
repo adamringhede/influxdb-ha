@@ -6,12 +6,14 @@ import (
 	"errors"
 	"math/rand"
 	"os"
+	"log"
+	"strconv"
 )
 
 const (
-	STATUS_UP = iota
+	STATUS_REMOVED = iota
+	STATUS_UP
 	STATUS_JOINING
-	STATUS_REMOVED
 	STATUS_IDLE
 )
 
@@ -22,20 +24,28 @@ type Node struct {
 	Name         string
 }
 
+type nodeMeta struct {
+	Status       int
+	DataLocation string
+}
+
 func (node *Node) updateFromBytes(data []byte) error {
 	buf := bytes.NewBuffer(data)
-	var m struct {
-		Tokens       []int
-		Status       int
-		DataLocation string
-	}
+	var m nodeMeta
 	err := gob.NewDecoder(buf).Decode(&m)
 	if err != nil {
 		return err
 	}
-	node.Tokens = m.Tokens
+	// Tokens can not be sent as meta data as the amount of bytes would
+	// easily exceed the hard limit of 512 as at this time 256 tokens are cerated
+	// with 32 bits each. We could of course decrease this amount if needed, however
+	// sending the tokens more than once is unnecessary and meta data should
+	// be very limited to allow for more efficient state propagation.
+	//node.Tokens = m.Tokens
 	node.Status = m.Status
 	node.DataLocation = m.DataLocation
+	log.Printf("[Cluster] Info: Received node status %d from %s", m.Status, node.Name)
+	log.Printf("I should send requests to %s", node.DataLocation)
 	return nil
 }
 
@@ -76,8 +86,12 @@ func (node *LocalNode) Init() error {
 		return err
 	}
 	if len(data.Tokens) == 0 {
-		data.Tokens = generateTokens(256)
+		log.Println("[Cluster] Creating new tokens.")
+		data.Tokens = generateTokens(32)
 		node.storage.save(data)
+	} else {
+		log.Printf("[Cluster] Initializing with stored tokens. Starting with %s",
+			strconv.FormatInt(int64(data.Tokens[0]),10))
 	}
 	node.Tokens = data.Tokens
 	node.Meta.PartitionKeys = data.PartitionKeys

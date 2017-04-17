@@ -14,5 +14,5 @@ func TestCreateNodeWithStorage(t *testing.T) {
 
 	node := CreateNodeWithStorage(storage)
 	assert.NoError(t, node.Init())
-	assert.Len(t, node.Tokens, 256)
+	assert.Len(t, node.Tokens, 32)
 }

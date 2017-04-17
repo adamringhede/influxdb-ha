@@ -13,6 +13,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // Message represents a user-facing message to be included with the result.
@@ -93,6 +94,7 @@ func request(statement influxql.Statement, host string, client *http.Client, r *
 	res, err := client.Post(baseUrl.String(), "", r.Body)
 	results := []result{}
 	if err != nil {
+		log.Println(err)
 		return results, err, res
 	}
 	if res.StatusCode/100 != 2 {
@@ -104,8 +106,9 @@ func request(statement influxql.Statement, host string, client *http.Client, r *
 }
 
 type QueryHandler struct {
-	client   *http.Client
-	resolver *cluster.Resolver
+	client      *http.Client
+	resolver    *cluster.Resolver
+	partitioner *cluster.Partitioner
 }
 
 func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +116,10 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if queryParam != "" {
 		allResults := []result{}
 		q, parseErr := influxql.ParseQuery(r.URL.Query()["q"][0])
+		db := r.URL.Query()["db"][0]
+		if db == "" {
+			db = "default"
+		}
 		if parseErr != nil {
 			jsonError(w, http.StatusBadRequest, "error parsing query: "+parseErr.Error())
 			return
@@ -220,10 +227,14 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// TODO Get the replicaset hosts of the shard holding that shard
 				// TODO Select one of those hosts and pass on the query.
 
-				all := h.resolver.FindAll()
+				/*all := h.resolver.FindAll()
 				location := all[rand.Intn(len(all))]
-				results, err, res := request(s, location, h.client, r)
+				results, err, res := request(s, location, h.client, r)*/
+
+				c := &Coordinator{h.resolver, h.partitioner}
+				results, err, res := c.Handle(s, r, db)
 				if err != nil {
+					log.Println(err)
 					passBack(&w, res)
 					continue
 				}
@@ -249,6 +260,7 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// This is the default handler.
 	all := h.resolver.FindAll()
+	log.Printf("Resolver found the following servers: %s", strings.Join(all, ", "))
 	location := all[rand.Intn(len(all))]
 	log.Print("Selected host at " + location)
 	baseUrl, _ := url.Parse("http://" + location + r.URL.Path)

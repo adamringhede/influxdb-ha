@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"github.com/hashicorp/memberlist"
 	"log"
+	"encoding/gob"
+	"bytes"
 )
 
 type TokenDelegate interface {
@@ -15,6 +17,7 @@ type Config struct {
 	BindAddr     string
 	BindPort     int
 	MetaFilename string
+	DataLocation	string
 }
 
 func (c Config) SetDefaults() {
@@ -112,8 +115,12 @@ func (h *Handle) createLocalNode(config Config) error {
 		return err
 	}
 	h.LocalNode = CreateNodeWithStorage(storage)
-	h.LocalNode.DataLocation = "0.0.0.0:18086"
-	return h.LocalNode.Init()
+	h.LocalNode.DataLocation = config.DataLocation//"0.0.0.0:18086"
+	initErr := h.LocalNode.Init()
+	if initErr != nil {
+		return initErr
+	}
+	return nil
 }
 
 func (h *Handle) RemoveNode(name string) {
@@ -123,13 +130,18 @@ func (h *Handle) RemoveNode(name string) {
 func (h *Handle) addMember(member *memberlist.Node) {
 	if _, ok := h.Nodes[member.Name]; !ok {
 		node := &Node{}
-		node.updateFromBytes(member.Meta)
 		node.Name = member.Name
-		node.DataLocation = member.Addr.String() + ":18086"
+		node.updateFromBytes(member.Meta)
+		// TODO data location should either be retrieved from the meta data
+		// by default or it should just be the same endpoint but with a query
+		// parameter to indicate that the query should be passed to the local
+		// instance.
+		//node.DataLocation = member.Addr.String() + ":18086"
 		// the resolver needs to be aware of new tokens.
 		h.Nodes[member.Name] = node
 		log.Printf("[Cluster] Added cluster member %s", member.Name)
 		if h.TokenDelegate != nil {
+			//log.Printf("[Cluster] Member %s has %s", member.Name, strconv.FormatInt(int64(len(node.Tokens)), 10))
 			for _, token := range node.Tokens {
 				h.TokenDelegate.NotifyNewToken(token, node)
 			}
@@ -195,8 +207,16 @@ type nodeDelegate struct {
 // when broadcasting an alive message. It's length is limited to
 // the given byte size. This metadata is available in the Node structure.
 func (d nodeDelegate) NodeMeta(limit int) []byte {
-	// TODO get necessary data about the node like influxdb port
-	return []byte{}
+	var meta bytes.Buffer
+	data := nodeMeta{
+		d.handle.LocalNode.Status,
+		d.handle.LocalNode.DataLocation,
+	}
+	err := gob.NewEncoder(&meta).Encode(data)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return meta.Bytes()
 }
 
 // NotifyMsg is called when a user-data message is received.
