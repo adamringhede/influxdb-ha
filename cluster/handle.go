@@ -1,11 +1,11 @@
 package cluster
 
 import (
+	"bytes"
+	"encoding/gob"
 	"encoding/json"
 	"github.com/hashicorp/memberlist"
 	"log"
-	"encoding/gob"
-	"bytes"
 )
 
 type TokenDelegate interface {
@@ -17,7 +17,7 @@ type Config struct {
 	BindAddr     string
 	BindPort     int
 	MetaFilename string
-	DataLocation	string
+	DataLocation string
 }
 
 func (c Config) SetDefaults() {
@@ -79,16 +79,31 @@ func (h *Handle) Join(existing []string) error {
 }
 
 type nodeUpdate struct {
-	Name   string
-	Tokens []int
+	Name    string
+	Tokens  []int
+	Removed bool
+}
+
+func newTokenUpdate(name string, tokens []int) nodeUpdate {
+	update := nodeUpdate{}
+	update.Name = name
+	update.Tokens = tokens
+	return update
+}
+
+func newRemovedUpdate(name string, tokens[]int) nodeUpdate {
+	update := nodeUpdate{}
+	update.Name = name
+	update.Removed = true
+	return update
 }
 
 func (h *Handle) BroadcastTokens() error {
 	local := h.list.LocalNode()
-	data, err := json.Marshal(nodeUpdate{
+	data, err := json.Marshal(newTokenUpdate(
 		h.LocalNode.Name,
 		h.LocalNode.Tokens,
-	})
+	))
 	if err != nil {
 		return err
 	}
@@ -108,14 +123,14 @@ func (h *Handle) BroadcastTokens() error {
 func (h *Handle) createLocalNode(config Config) error {
 	filePath := config.MetaFilename
 	if filePath == "" {
-		filePath = "/var/opt/influxdb-ha/meta"
+		filePath = "/data/.influxdb-ha/meta"
 	}
 	storage, err := openBoltStorage(filePath)
 	if err != nil {
 		return err
 	}
 	h.LocalNode = CreateNodeWithStorage(storage)
-	h.LocalNode.DataLocation = config.DataLocation//"0.0.0.0:18086"
+	h.LocalNode.DataLocation = config.DataLocation //"0.0.0.0:18086"
 	initErr := h.LocalNode.Init()
 	if initErr != nil {
 		return initErr
@@ -123,8 +138,12 @@ func (h *Handle) createLocalNode(config Config) error {
 	return nil
 }
 
-func (h *Handle) RemoveNode(name string) {
-	panic("Not implemented")
+func (h *Handle) RemoveNode(node *Node) {
+	if h.TokenDelegate != nil {
+		for _, token := range node.Tokens {
+			h.TokenDelegate.NotifyRemovedToken(token, node)
+		}
+	}
 }
 
 func (h *Handle) addMember(member *memberlist.Node) {
@@ -158,9 +177,9 @@ func (e eventDelegate) NotifyJoin(member *memberlist.Node) {
 	if member.Name == e.handle.LocalNode.Name {
 		return
 	}
-	data, err := json.Marshal(nodeUpdate{
+	data, err := json.Marshal(newTokenUpdate(
 		e.handle.LocalNode.Name,
-		e.handle.LocalNode.Tokens})
+		e.handle.LocalNode.Tokens))
 	if err != nil {
 		panic(err)
 	}
@@ -251,6 +270,9 @@ func (d nodeDelegate) NotifyMsg(msg []byte) {
 				}
 			}
 			node.Tokens = update.Tokens
+		}
+		if update.Removed {
+			d.handle.RemoveNode(node)
 		}
 	}
 }
