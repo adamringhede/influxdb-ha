@@ -71,6 +71,13 @@ func (s *etcdTokenStorage) Release(token int) error {
 	return err
 }
 
+func NewEtcdTokenStorageWithClient(c client.Client) *etcdTokenStorage {
+	s := &etcdTokenStorage{}
+	s.client = c
+	s.kapi = client.NewKeysAPI(c)
+	return s
+}
+
 func (s *etcdTokenStorage) Open(entrypoints []string) {
 	c, err := client.New(client.Config{
 		Endpoints:               entrypoints,
@@ -81,8 +88,7 @@ func (s *etcdTokenStorage) Open(entrypoints []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	kapi := client.NewKeysAPI(c)
-	s.kapi = kapi
+	s.kapi = client.NewKeysAPI(c)
 }
 
 func createEtcdTokenPath(token int) string {
