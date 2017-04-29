@@ -45,12 +45,17 @@ func (c *PartitionCollection) GetMultiple(key int, count int) []*Partition {
 	if !ok {
 		return res
 	}
-	found := make(map[int]bool)
+	found := make(map[int]bool, count)
+	unique := make(map[*Node]bool, count)
 	for len(res) <= count {
 		k := node.Key.(int)
 		if _, ok := found[k]; !ok {
-			res = append(res, node.Value.(*Partition))
-			found[k] = true
+			partition := node.Value.(*Partition)
+			if _, alreadyAdded := unique[partition.Node]; !alreadyAdded {
+				res = append(res, partition)
+				found[k] = true
+				unique[partition.Node] = true
+			}
 		} else {
 			break
 		}

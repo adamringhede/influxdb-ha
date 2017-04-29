@@ -23,7 +23,7 @@ func TestResolver_FindByKey(t *testing.T) {
 	resolver.AddToken(3, &Node{})
 
 	locations := resolver.FindByKey(2, READ)
-	assert.Len(t, locations, 1)
+	assert.Len(t, locations, 2)
 	assert.Contains(t, locations, ":8086")
 
 	resolver.RemoveToken(1)

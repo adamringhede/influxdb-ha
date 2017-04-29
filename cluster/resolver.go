@@ -24,11 +24,16 @@ func NewResolver() *Resolver {
 // On reads, it will not return nodes with status "syncing"
 // However, on writes it will return "syncing" nodes so that they can catch up.
 func (r *Resolver) FindByKey(key int, purpose int) []string {
-	partition := r.collection.Get(key)
-	if partition != nil {
-		return []string{partition.Node.DataLocation}
+	partitions := r.collection.GetMultiple(key, 2)
+	locationMap := make(map[string]bool)
+	for _, p := range partitions {
+		locationMap[p.Node.DataLocation] = true
 	}
-	return []string{}
+	locations := []string{}
+	for location, _ := range locationMap {
+		locations = append(locations, location)
+	}
+	return locations
 }
 
 func (r *Resolver) FindAll() []string {
