@@ -63,7 +63,7 @@ func (p *Partitioner) GetKeyByMeasurement(db string, msmt string) (PartitionKey,
 	return key, ok
 }
 
-func (p *Partitioner) SetKeys(keys []PartitionKey) {
+func (p *Partitioner) AddKeys(keys []PartitionKey) {
 	for _, k := range keys {
 		p.AddKey(k)
 	}
