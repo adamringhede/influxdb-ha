@@ -47,7 +47,7 @@ func (c *PartitionCollection) GetMultiple(key int, count int) []*Partition {
 	}
 	found := make(map[int]bool, count)
 	unique := make(map[*Node]bool, count)
-	for len(res) <= count {
+	for len(res) < count {
 		k := node.Key.(int)
 		if _, ok := found[k]; !ok {
 			partition := node.Value.(*Partition)

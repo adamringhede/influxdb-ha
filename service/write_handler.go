@@ -76,7 +76,7 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if _, ok := pointGroups[numericHash]; !ok {
 				pointGroups[numericHash] = []models.Point{}
 			}
-			point.SetTags(append(point.Tags(), models.Tag{Key: []byte("_partition"), Value: []byte(strconv.FormatInt(int64(numericHash), 10))}))
+			//point.SetTags(append(point.Tags(), models.Tag{Key: []byte("_partition"), Value: []byte(strconv.FormatInt(int64(numericHash), 10))}))
 			pointGroups[numericHash] = append(pointGroups[numericHash], point)
 		} else {
 			broadcastGroup = append(broadcastGroup, point)

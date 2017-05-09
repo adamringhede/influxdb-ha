@@ -3,12 +3,30 @@ package cluster
 import (
 	"testing"
 	"github.com/stretchr/testify/assert"
+	"github.com/coreos/etcd/mvcc/mvccpb"
 )
 
 func newEtcdStorage() *etcdTokenStorage {
 	storage := NewEtcdTokenStorage()
 	storage.Open([]string{"http://127.0.0.1:2379"})
 	return storage
+}
+
+func TestEtcdTokenStorage_Watch(t *testing.T) {
+	storage := newEtcdStorage()
+	ch := storage.Watch()
+	storage.Assign(1, "foo")
+	result := <-ch
+	assert.Len(t, result.Events, 1)
+	event := result.Events[0]
+	assert.Equal(t, mvccpb.PUT, event.Type)
+	assert.Equal(t, "foo", string(event.Kv.Value))
+}
+
+func TestEtcdTokenStorage_Init(t *testing.T) {
+	storage := newEtcdStorage()
+	_, err := storage.InitMany("bar", 4)
+	assert.NoError(t, err)
 }
 
 func TestEtcdTokenStorage_Reserve(t *testing.T) {

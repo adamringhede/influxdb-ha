@@ -10,7 +10,7 @@ services:
       - "8086:8086"
     entrypoint: bin/handle
     hostname: influxdb-handle
-    command: -port 8084 -client-port 8086 -data "influxdb-1:8086"
+    command: -etcd "etcd-1:2379" -client-port 8086 -data "influxdb-1:8086"
   influxdb-handle2:
     image: influxdb-ha/handle
     ports:
@@ -20,7 +20,7 @@ services:
     depends_on:
       - influxdb-handle
     entrypoint: bin/handle
-    command: -join "influxdb-handle:8084" -port 8184 -client-port 8186 -data "influxdb-2:8086"
+    command: -etcd "etcd-1:2379" -client-port 8186 -data "influxdb-2:8086"
   influxdb-handle3:
     image: influxdb-ha/handle
     ports:
@@ -30,7 +30,7 @@ services:
     depends_on:
       - influxdb-handle
     entrypoint: bin/handle
-    command: -join "influxdb-handle:8084" -port 8284 -client-port 8286 -data "influxdb-3:8086"
+    command: -etcd "etcd-1:2379" -client-port 8286 -data "influxdb-3:8086"
 
   influxdb-1:
     image: influxdb:1.2
@@ -47,3 +47,11 @@ services:
     ports:
       - "26086:28086"
     hostname: influxdb-3
+
+
+  etcd-1:
+    image: quay.io/coreos/etcd:v3.1.4
+    ports:
+      - "2379:2379"
+    hostname: etcd-1
+    command: "etcd --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://etcd-1:2379"
