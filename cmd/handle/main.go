@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"context"
 	"encoding/json"
+	"github.com/adamringhede/influxdb-ha/sync"
 )
 
 type controller struct {
@@ -62,62 +63,6 @@ func main() {
 	saveErr := nodeStorage.Save(localNode)
 	handleErr(saveErr)
 
-	if isNew {
-		mtx, err := tokenStorage.Lock()
-		handleErr(err)
-		defer mtx.Unlock(context.Background())
-
-		initiated, err := tokenStorage.InitMany(localNode.Name, 16)
-		if err != nil {
-			log.Println("Intitation of tokens failed")
-		}
-		handleErr(err)
-		if !initiated {
-			toSteal, err := tokenStorage.SuggestReservations()
-			log.Printf("Stealing %d tokens", len(toSteal))
-			log.Println(toSteal)
-			if err != nil {
-				mtx.Unlock(context.Background())
-			}
-			handleErr(err)
-			reserved := []int{}
-			for _, tokenToSteal := range toSteal {
-
-				ok, err := tokenStorage.Reserve(tokenToSteal, localNode.Name)
-				if err != nil {
-					mtx.Unlock(context.Background())
-					handleErr(err)
-				}
-				if ok {
-					reserved = append(reserved, tokenToSteal)
-				}
-			}
-
-			// TODO Need to import data for the tokens before unlocking
-			// or else another node can try to reserve the same tokens
-			// and therefore only get a few.
-
-			/*
-			For each token, get preceding tokens based on replication factor
-			Instantiate an importer that resolves the nodes for each token
-			and starts reading the data in limited series and regularly checkpoints.
-			All read data should be written to the local node's data location.
-			 */
-
-			for _, token := range reserved {
-				tokenStorage.Release(token)
-				tokenStorage.Assign(token, localNode.Name)
-				// Create a backlog items for the primary nodes to delete their data for each stolen
-				// token.
-			}
-
-		} else {
-			log.Println("Initiated tokens")
-		}
-		mtx.Unlock(context.Background())
-	} else {
-		// TODO check if importing data, if so, then resume.
-	}
 
 	nodes, err := nodeStorage.GetAll()
 	handleErr(err)
@@ -193,6 +138,71 @@ func main() {
 			}
 		}
 	})()
+
+	// TODO this does not work on the initial startup,
+
+	if isNew {
+		mtx, err := tokenStorage.Lock()
+		handleErr(err)
+		defer mtx.Unlock(context.Background())
+
+		initiated, err := tokenStorage.InitMany(localNode.Name, 16)
+		if err != nil {
+			log.Println("Intitation of tokens failed")
+		}
+		handleErr(err)
+		if !initiated {
+			toSteal, err := tokenStorage.SuggestReservations()
+			log.Printf("Stealing %d tokens", len(toSteal))
+			log.Println(toSteal)
+			if err != nil {
+				mtx.Unlock(context.Background())
+			}
+			handleErr(err)
+			reserved := []int{}
+			for _, tokenToSteal := range toSteal {
+
+				ok, err := tokenStorage.Reserve(tokenToSteal, localNode.Name)
+				if err != nil {
+					mtx.Unlock(context.Background())
+					handleErr(err)
+				}
+				if ok {
+					reserved = append(reserved, tokenToSteal)
+				}
+			}
+
+			/*
+			For each token, get preceding tokens based on replication factor
+			Instantiate an importer that resolves the nodes for each token
+			and starts reading the data in limited series and regularly checkpoints.
+			All read data should be written to the local node's data location.
+			 */
+
+			// TODO start http service so that this node can receive writes while it is importing.
+			/// However, read requests should be forwarded to other nodes.
+
+
+			// TODO also import for tokens before the reserved ones based on the replication factor.
+			// If the replication factor is different for each measurement or RPs, then this must
+			// also be taken into account so we don't download more or less than we need to.
+
+			importer := sync.BasicImporter{}
+			importer.Import(reserved, resolver, localNode.DataLocation)
+
+			for _, token := range reserved {
+				tokenStorage.Release(token)
+				tokenStorage.Assign(token, localNode.Name)
+				// Create a backlog items for the primary nodes to delete their data for each stolen
+				// token.
+			}
+		} else {
+			log.Println("Initiated tokens")
+		}
+		mtx.Unlock(context.Background())
+	} else {
+		// TODO check if importing data, if so, then resume.
+	}
 
 	httpConfig := service.Config{
 		BindAddr: *bindClientAddr,

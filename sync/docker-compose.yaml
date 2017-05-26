@@ -1,0 +1,25 @@
+version: '2'
+services:
+  influxdb-1:
+    image: influxdb:1.2
+    ports:
+      - "28086:8086"
+    hostname: influxdb-1
+  influxdb-2:
+    image: influxdb:1.2
+    ports:
+      - "27086:8086"
+    hostname: influxdb-2
+  influxdb-3:
+    image: influxdb:1.2
+    ports:
+      - "26086:8086"
+    hostname: influxdb-3
+
+
+  etcd-1:
+    image: quay.io/coreos/etcd:v3.1.4
+    ports:
+      - "2379:2379"
+    hostname: etcd-1
+    command: "etcd --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://etcd-1:2379"
