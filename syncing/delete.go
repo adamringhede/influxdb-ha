@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"log"
 	"strings"
+	"github.com/adamringhede/influxdb-ha/cluster"
 )
 
 func Delete(token int, location string) {
@@ -17,7 +18,7 @@ func Delete(token int, location string) {
 	}
 	for db, dbMeta := range meta.databases {
 		for _, rp := range dbMeta.rps {
-			q := `DROP SERIES WHERE _partitionToken='` + strconv.Itoa(token) + `'`
+			q := `DROP SERIES WHERE `+ cluster.PartitionTagName +`='` + strconv.Itoa(token) + `'`
 			log.Printf("%s: %s", location, q)
 			params := []string{"db=" + db, "q=" + q, "rp=" + rp}
 			values, err := url.ParseQuery(strings.Join(params, "&"))

@@ -7,6 +7,8 @@ import (
 	"github.com/adamringhede/influxdb-ha/hash"
 )
 
+const PartitionTagName = "_partitionToken"
+
 // Partitioner is used to generate numerical hash values based on a given
 // set of values and a set of partition keys. The partition keys can be
 // changed by an administrator while the server is running.

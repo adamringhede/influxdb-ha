@@ -4,6 +4,7 @@ import (
 	"testing"
 	"github.com/stretchr/testify/assert"
 	"time"
+	"github.com/adamringhede/influxdb-ha/cluster"
 )
 
 func TestDelete(t *testing.T) {
@@ -13,8 +14,8 @@ func TestDelete(t *testing.T) {
 	})
 	time.Sleep(10 * time.Millisecond)
 	postLines(influxOne, testDB, "autogen", []string{
-		"treasures,type=gold,_partitionToken=0 value=5",
-		"treasures,type=silver,_partitionToken=100 value=4",
+		"treasures,type=gold," + cluster.PartitionTagName + "=0 value=5",
+		"treasures,type=silver," + cluster.PartitionTagName + "=100 value=4",
 	})
 
 	assertPointsCount(t, 2)

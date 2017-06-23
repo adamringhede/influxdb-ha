@@ -319,7 +319,7 @@ func fetchSimple(q, location, db string) ([]result, error) {
 
 func fetchTokenData(token int, location, db, rp string, measurement string) (chan result, error) {
 	resp, err := get(
-		`SELECT * FROM `+rp+"."+measurement+` WHERE _partitionToken = '`+strconv.Itoa(token)+`'`,
+		`SELECT * FROM `+rp+"."+measurement+` WHERE ` + cluster.PartitionTagName +` = '`+strconv.Itoa(token)+`'`,
 		location,
 		db, true)
 	if err != nil {

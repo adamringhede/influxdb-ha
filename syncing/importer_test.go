@@ -52,8 +52,8 @@ func TestImporter(t *testing.T) {
 	}
 
 	postLines(influxOne, testDB, "autogen", []string{
-		"treasures,type=gold,_partitionToken=0 value=5",
-		"treasures,type=silver,_partitionToken=100 value=4",
+		"treasures,type=gold," + cluster.PartitionTagName + "=0 value=5",
+		"treasures,type=silver," + cluster.PartitionTagName + "=100 value=4",
 	})
 
 	importer := &BasicImporter{}

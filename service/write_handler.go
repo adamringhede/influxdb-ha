@@ -81,7 +81,7 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if partition == nil {
 				log.Panicf("Could not find partition for key %d. Something is wrong with the resolver.", numericHash)
 			}
-			point.AddTag("_partitionToken", strconv.Itoa(partition.Token))
+			point.AddTag(cluster.PartitionTagName, strconv.Itoa(partition.Token))
 			pointGroups[numericHash] = append(pointGroups[numericHash], point)
 		} else {
 			broadcastGroup = append(broadcastGroup, point)
