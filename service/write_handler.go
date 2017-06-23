@@ -76,7 +76,12 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if _, ok := pointGroups[numericHash]; !ok {
 				pointGroups[numericHash] = []models.Point{}
 			}
-			//point.SetTags(append(point.Tags(), models.Tag{Key: []byte("_partition"), Value: []byte(strconv.FormatInt(int64(numericHash), 10))}))
+			// TODO floor the numericHash to an actual token value. This is required for importing to work as it is not possible to query ranges.
+			partition := h.resolver.GetPartition(numericHash)
+			if partition == nil {
+				log.Panicf("Could not find partition for key %d. Something is wrong with the resolver.", numericHash)
+			}
+			point.AddTag("_partitionToken", strconv.Itoa(partition.Token))
 			pointGroups[numericHash] = append(pointGroups[numericHash], point)
 		} else {
 			broadcastGroup = append(broadcastGroup, point)

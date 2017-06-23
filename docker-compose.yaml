@@ -10,6 +10,9 @@ services:
       - "8086:8086"
     entrypoint: bin/handle
     hostname: influxdb-handle
+    depends_on:
+      - etcd-1
+      - influxdb-1
     command: -etcd "etcd-1:2379" -client-port 8086 -data "influxdb-1:8086"
   influxdb-handle2:
     image: influxdb-ha/handle
@@ -19,6 +22,8 @@ services:
     hostname: influxdb-handle2
     depends_on:
       - influxdb-handle
+      - etcd-1
+      - influxdb-2
     entrypoint: bin/handle
     command: -etcd "etcd-1:2379" -client-port 8186 -data "influxdb-2:8086"
   influxdb-handle3:
@@ -29,6 +34,8 @@ services:
     hostname: influxdb-handle3
     depends_on:
       - influxdb-handle
+      - etcd-1
+      - influxdb-3
     entrypoint: bin/handle
     command: -etcd "etcd-1:2379" -client-port 8286 -data "influxdb-3:8086"
 

@@ -37,6 +37,10 @@ func (r *Resolver) FindByKey(key int, purpose int) []string {
 	return locations
 }
 
+func (r *Resolver) GetPartition(key int) *Partition {
+	return r.collection.Get(key)
+}
+
 func (r *Resolver) FindPrimary(key int) *Node {
 	p := r.collection.Get(key)
 	if p != nil {
