@@ -1,4 +1,4 @@
-package sync
+package syncing
 
 import "github.com/influxdata/influxdb/models"
 

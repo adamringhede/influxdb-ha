@@ -1,4 +1,4 @@
-package sync
+package syncing
 
 import (
 	"github.com/stretchr/testify/assert"
@@ -16,11 +16,11 @@ const testDB = "sharded"
 func multiple(location string, commands []string) {
 	for _, q := range commands {
 		resp, err := get(q, location, "", false)
-		if resp.StatusCode != 200 {
-			panic("Status code is not 200")
-		}
 		if err != nil {
 			panic(err)
+		}
+		if resp.StatusCode != 200 {
+			panic("Status code is not 200")
 		}
 	}
 }

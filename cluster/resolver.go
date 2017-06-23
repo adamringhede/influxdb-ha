@@ -14,17 +14,18 @@ type Resolver struct {
 	// nodes is a set of nodes. It is managed by AddToken and RemoveToken. It should never be
 	// changed outside of those functions.
 	nodes      map[*Node]int
+	replicationFactor int
 }
 
 func NewResolver() *Resolver {
-	return &Resolver{NewPartitionCollection(), make(map[*Node]int)}
+	return &Resolver{NewPartitionCollection(), make(map[*Node]int), 2}
 }
 
 // FindByKey can return multiple locations for replication and load balancing.
 // On reads, it will not return nodes with status "syncing"
 // However, on writes it will return "syncing" nodes so that they can catch up.
 func (r *Resolver) FindByKey(key int, purpose int) []string {
-	partitions := r.collection.GetMultiple(key, 2)
+	partitions := r.collection.GetMultiple(key, r.replicationFactor)
 	locationMap := make(map[string]bool)
 	for _, p := range partitions {
 		locationMap[p.Node.DataLocation] = true
@@ -34,6 +35,35 @@ func (r *Resolver) FindByKey(key int, purpose int) []string {
 		locations = append(locations, location)
 	}
 	return locations
+}
+
+func (r *Resolver) FindPrimary(key int) *Node {
+	p := r.collection.Get(key)
+	if p != nil {
+		return p.Node
+	}
+	return nil
+}
+
+func (r *Resolver) ReverseSecondaryLookup(key int) []int {
+	if r.replicationFactor == 1 {
+		return []int{key}
+	}
+	// If the caller has a sorted list of keys, it is trivial to avoid an n^2 complexity by optimizing this.
+	// and only iterate over the entire tree once.
+	tokens := []int{}
+	for _, p := range r.collection.tree.Values() {
+		if p.(*Partition).Token == key {
+			continue
+		}
+		targets := r.collection.GetMultiple(p.(*Partition).Token, r.replicationFactor)
+		for _, other := range targets {
+			if other.Token == key {
+				tokens = append(tokens, p.(*Partition).Token)
+			}
+		}
+	}
+	return tokens
 }
 
 func (r *Resolver) FindAll() []string {

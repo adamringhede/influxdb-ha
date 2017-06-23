@@ -34,17 +34,17 @@ func (s *etcdStorageBase) path(path string) string {
 	return etcdStorageBaseDir + "/" + s.clusterID + "/" + path + "/"
 }
 
-type etcdTokenStorage struct {
+type EtcdTokenStorage struct {
 	etcdStorageBase
 	session      *concurrency.Session
 	reservations map[int]clientv3.LeaseID
 }
 
-func (s *etcdTokenStorage) Watch() clientv3.WatchChan {
+func (s *EtcdTokenStorage) Watch() clientv3.WatchChan {
 	return s.client.Watch(context.Background(), s.path(etcdStorageTokens), clientv3.WithPrefix())
 }
 
-func (s *etcdTokenStorage) Lock() (*concurrency.Mutex, error) {
+func (s *EtcdTokenStorage) Lock() (*concurrency.Mutex, error) {
 	mtx := concurrency.NewMutex(s.session, s.path("reserving"))
 	err := mtx.Lock(context.Background())
 	if err != nil {
@@ -53,7 +53,7 @@ func (s *etcdTokenStorage) Lock() (*concurrency.Mutex, error) {
 	return mtx, nil
 }
 
-func (s *etcdTokenStorage) SuggestReservations() ([]int, error) {
+func (s *EtcdTokenStorage) SuggestReservations() ([]int, error) {
 	currentTokens, err := s.Get()
 	if err != nil {
 		return nil, err
@@ -79,14 +79,14 @@ func (s *etcdTokenStorage) SuggestReservations() ([]int, error) {
 }
 
 // Assign sets a token to refer to a certain node
-func (s *etcdTokenStorage) Assign(token int, node string) error {
+func (s *EtcdTokenStorage) Assign(token int, node string) error {
 	resp, err := s.client.Put(context.Background(), s.tokenPath(token, etcdStorageTokens), node)
 	log.Println(resp)
 	return err
 }
 
 // Get return a map of all tokens and the nodes they refer to.
-func (s *etcdTokenStorage) Get() (map[int]string, error) {
+func (s *EtcdTokenStorage) Get() (map[int]string, error) {
 	resp, getErr := s.client.Get(context.Background(), s.path(etcdStorageTokens), clientv3.WithPrefix())
 	if getErr != nil {
 		return nil, getErr
@@ -104,7 +104,7 @@ func (s *etcdTokenStorage) Get() (map[int]string, error) {
 
 // Reserve should prevent other nodes from assigning a token to itself as some other is
 // currently importing data for it to later assign the token to itself.
-func (s *etcdTokenStorage) Reserve(token int, node string) (bool, error) {
+func (s *EtcdTokenStorage) Reserve(token int, node string) (bool, error) {
 	resp, getErr := s.client.Get(context.Background(), s.tokenPath(token, etcdStorageReservedTokens))
 	// Do not reserve if it is reserved by some other node
 	if getErr != nil {
@@ -134,7 +134,7 @@ func (s *etcdTokenStorage) Reserve(token int, node string) (bool, error) {
 }
 
 // Release is called after a node has finished importing data for a token range
-func (s *etcdTokenStorage) Release(token int) error {
+func (s *EtcdTokenStorage) Release(token int) error {
 	if _, ok := s.reservations[token]; ok {
 		s.client.Revoke(context.Background(), s.reservations[token])
 	}
@@ -143,7 +143,7 @@ func (s *etcdTokenStorage) Release(token int) error {
 	return err
 }
 
-func (s *etcdTokenStorage) Init(node string, numRanges int) error {
+func (s *EtcdTokenStorage) Init(node string, numRanges int) error {
 	_, err := concurrency.NewSTM(s.client, func(stm concurrency.STM) error {
 		initKey := s.path("initiated")
 		initiated := stm.Get(initKey)
@@ -164,7 +164,7 @@ type errAlreadyInitiated struct{}
 
 func (e errAlreadyInitiated) Error() string { return "Already initiated" }
 
-func (s *etcdTokenStorage) InitMany(node string, numRanges int) (bool, error) {
+func (s *EtcdTokenStorage) InitMany(node string, numRanges int) (bool, error) {
 	initKey := s.path("initiated")
 	//mtx, lockErr := s.Lock()
 	//if lockErr != nil {
@@ -212,13 +212,13 @@ func (s *etcdTokenStorage) InitMany(node string, numRanges int) (bool, error) {
 	return true, nil
 }
 
-func NewEtcdTokenStorage() *etcdTokenStorage {
-	s := &etcdTokenStorage{}
+func NewEtcdTokenStorage() *EtcdTokenStorage {
+	s := &EtcdTokenStorage{}
 	s.reservations = make(map[int]clientv3.LeaseID)
 	return s
 }
 
-func NewEtcdTokenStorageWithClient(c *clientv3.Client) *etcdTokenStorage {
+func NewEtcdTokenStorageWithClient(c *clientv3.Client) *EtcdTokenStorage {
 	s := NewEtcdTokenStorage()
 	s.client = c
 	session, err := concurrency.NewSession(s.client)
@@ -229,7 +229,7 @@ func NewEtcdTokenStorageWithClient(c *clientv3.Client) *etcdTokenStorage {
 	return s
 }
 
-func (s *etcdTokenStorage) Open(entrypoints []string) {
+func (s *EtcdTokenStorage) Open(entrypoints []string) {
 	c, err := clientv3.New(clientv3.Config{
 		Endpoints:   entrypoints,
 		DialTimeout: 5 * time.Second,
@@ -245,10 +245,10 @@ func (s *etcdTokenStorage) Open(entrypoints []string) {
 	s.session = session
 }
 
-func (s *etcdTokenStorage) Close() {
+func (s *EtcdTokenStorage) Close() {
 	s.client.Close()
 }
 
-func (s *etcdTokenStorage) tokenPath(token int, path string) string {
+func (s *EtcdTokenStorage) tokenPath(token int, path string) string {
 	return s.path(path) + strconv.Itoa(token)
 }

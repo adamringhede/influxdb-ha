@@ -6,7 +6,7 @@ import (
 	"github.com/coreos/etcd/mvcc/mvccpb"
 )
 
-func newEtcdStorage() *etcdTokenStorage {
+func newEtcdStorage() *EtcdTokenStorage {
 	storage := NewEtcdTokenStorage()
 	storage.Open([]string{"http://127.0.0.1:2379"})
 	return storage

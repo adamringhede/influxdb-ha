@@ -59,6 +59,7 @@ func (c *Coordinator) Handle(stmt *influxql.SelectStatement, r *http.Request, db
 	// sending the query to only a single location does not work when broadcasting
 	// all servers / number of replicas have to be queried and results need to be merged.
 	selectedLocation := locations[rand.Intn(len(locations))]
+	log.Printf("Selecting location %s", selectedLocation)
 	client := &http.Client{Timeout: 10 * time.Second}
 	results, err, res := request(stmt, selectedLocation, client, r)
 	return results, err, res

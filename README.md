@@ -25,6 +25,31 @@ curl -G 'http://localhost:5096/query?pretty=true' --data-urlencode "db=mydb" --d
 
 
 
+
+Start demo
+
+docker-compose up -d etcd-1
+docker-compose up -d influxdb-1
+docker-compose up -d influxdb-2
+docker-compose up -d influxdb-3
+
+docker-compose up -d influxdb-handle
+docker-compose up -d influxdb-handle2
+docker-compose up -d influxdb-handle3
+
+
+Start node 1
+Write some data which should be partitioned
+	INSERT  treasures,captain_id=pirate_king,type=silver,_partitionToken=939524089 value=2
+Start node 2
+All data should now exist on both
+Start node 3
+One third of the data should now be available in node 3, including primary and replicated data.
+The migrated data should only be available in other nodes if they carry replicas.
+
+SELECT * FROM treasures WHERE type = 'silver'
+
+
 ```
 
 The database has to be created first on each instance. 
