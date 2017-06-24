@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"github.com/adamringhede/influxdb-ha/hash"
+	"github.com/schwarmco/go-cartesian-product"
 )
 
 const PartitionTagName = "_partitionToken"
@@ -20,13 +21,49 @@ func NewPartitioner() *Partitioner {
 	return &Partitioner{make(map[string]PartitionKey)}
 }
 
-func (p *Partitioner) GetHash(key PartitionKey, values map[string][]string) (int, error) {
+func createCompoundKeys(key PartitionKey, tags map[string][]string) []string {
+	partitionValues := [][]interface{}{}
+	for _, tag := range key.Tags {
+		if values, ok := tags[tag]; ok {
+			s := make([]interface{}, len(values))
+			for i, v := range values {
+				s[i] = v
+			}
+			partitionValues = append(partitionValues, s)
+		} else {
+			return []string{}
+		}
+	}
+	combinations := []string{}
+	for tagsValues := range cartesian.Iter(partitionValues...) {
+		combination := ""
+		for _, value := range tagsValues {
+			combination += value.(string)
+		}
+		combinations = append(combinations, combination)
+	}
+	return combinations
+}
+
+func (p *Partitioner) GetHashes(key PartitionKey, tags map[string][]string) []int {
+	hashes := []int{}
+	for _, combination := range createCompoundKeys(key, tags) {
+		hashes = append(hashes, int(hash.String(combination)))
+	}
+	return hashes
+}
+
+func (p *Partitioner) GetHash(key PartitionKey, tags map[string][]string) (int, error) {
 	compoundKey := []string{}
 	for _, tag := range key.Tags {
-		if values, ok := values[tag]; ok {
-			// if there are multiple values, multiple keys have to be created.
+		if values, ok := tags[tag]; ok {
+			/*
+			If there are multiple values, multiple hashes need to be returned for every possible combination.
+			This requires that the query coordinator makes the request to multiple nodes and then merges the
+			results.
+			 */
 			if len(values) > 1 {
-				return 0, errors.New("Multiple keys are not yet supported")
+				return 0, errors.New("Multiple tag values for the same tag is not supported")
 			}
 			compoundKey = append(compoundKey, values[0])
 		} else {

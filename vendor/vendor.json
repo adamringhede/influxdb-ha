@@ -815,6 +815,12 @@
 			"revisionTime": "2017-05-06T06:31:59Z"
 		},
 		{
+			"checksumSHA1": "DJJuAWVDPJnkoLkSIRtPLnfep5Q=",
+			"path": "github.com/schwarmco/go-cartesian-product",
+			"revision": "c2c0aca869a6cbf51e017ce148b949d9dee09bc3",
+			"revisionTime": "2017-01-30T17:09:49Z"
+		},
+		{
 			"checksumSHA1": "tnMZLo/kR9Kqx6GtmWwowtTLlA8=",
 			"path": "github.com/sean-/seed",
 			"revision": "e2103e2c35297fb7e17febb81e49b312087a2372",
