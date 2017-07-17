@@ -1,12 +1,14 @@
 package merge
 
-import "strconv"
+import (
+	"strconv"
+)
 
-type Expr struct {
+type Values struct {
 	Field string
 }
 
-func (n *Expr) Next(source ResultSource) []float64 {
+func (n *Values) Next(source ResultSource) []float64 {
 	return source.Next(n.Field)
 }
 
@@ -14,13 +16,13 @@ type MovingAverage struct {
 
 }
 
-func (n *MovingAverage) Values() []float64 {
+func (n *MovingAverage) Next() []float64 {
 	// get raw results and just do a weighted mean of them.
 	return []float64{}
 }
 
 type Top struct {
-	tops *Expr
+	tops *Values
 	count int
 }
 
@@ -47,9 +49,38 @@ func (n *Top) Next(source ResultSource) []float64 {
 	return tops[:n.count]
 }
 
+type Bottom struct {
+	bottoms *Values
+	count int
+}
+
+func NewBottom(fieldKey string, count int, qb *QueryBuilder) *Bottom {
+	return &Bottom{
+		qb.Get("bottom(" + fieldKey + ", " + strconv.Itoa(count) + ")"),
+		count,
+	}
+}
+
+func (n *Bottom) Next(source ResultSource) []float64 {
+	bottoms := n.bottoms.Next(source)
+	for i := 0; i < n.count; i++ {
+		minIndex := i
+		minValue := bottoms[i]
+		for j := i + 1; j < len(bottoms); j++ {
+			if bottoms[j] > minValue {
+				minIndex = j
+				minValue = bottoms[j]
+				bottoms[i], bottoms[minIndex] = bottoms[minIndex], bottoms[i]
+			}
+		}
+	}
+	return bottoms[:n.count]
+}
+
+
 type Mean struct {
-	sums *Expr
-	counts *Expr
+	sums *Values
+	counts *Values
 }
 
 func NewMean(fieldKey string, qb *QueryBuilder) *Mean {
@@ -72,7 +103,7 @@ func (n *Mean) Next(source ResultSource) []float64 {
 }
 
 type Max struct {
-	maxes *Expr
+	maxes *Values
 }
 
 func (n *Max) Next(source ResultSource) []float64 {
@@ -86,7 +117,7 @@ func (n *Max) Next(source ResultSource) []float64 {
 }
 
 type Sum struct {
-	sums *Expr
+	sums *Values
 }
 
 func NewSum(fieldKey string, qb *QueryBuilder) *Sum {

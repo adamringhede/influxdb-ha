@@ -55,12 +55,21 @@ func NewResultSourceMock(results []result) *ResultSourceMock {
 func (s *ResultSourceMock) Next(fieldKey string) []float64 {
 	res := make([]float64, len(s.data[s.i].values))
 	fieldIndex, fieldExists := s.fieldIndices[fieldKey]
-	if s.Done() || !fieldExists {
+	if !fieldExists {
+		panic(fmt.Errorf("No values exist for field key %s", fieldKey))
+	}
+	if s.Done() {
 		return res
 	}
 	for i, v := range s.data[s.i].values {
 		if data, ok := v.([]interface{}); ok {
-			res[i] = float64(data[fieldIndex].(float64))
+			switch value := data[fieldIndex].(type) {
+			case int: res[i] = float64(value)
+			case float64: res[i] = value
+			default:
+				panic(fmt.Errorf("Unsupported type %T", value))
+			}
+
 		}
 	}
 	return res
@@ -88,19 +97,19 @@ func Test_mergeResults(t *testing.T) {
 
 	a := result{Series: []*models.Row{
 		{
-			Columns: []string{"time", "sum_value_"},
+			Columns: []string{"time", "sum_value_", "top_value__1_", "mean_value_", "count_value_"},
 			Values: [][]interface{}{
-				{"1970-01-01T00:00:00Z", 5.0},
-				{"1970-01-02T00:00:00Z", 8.0},
+				{"1970-01-01T00:00:00Z", 5.0, 5.0, 5.0, 1},
+				{"1970-01-02T00:00:00Z", 8.0, 8.0, 8.0, 1},
 			}},
 	}}
 
 	b := result{Series: []*models.Row{
 		{
-			Columns: []string{"time", "sum_value_"},
+			Columns: []string{"time", "sum_value_", "top_value__1_", "mean_value_", "count_value_"},
 			Values: [][]interface{}{
-				{"1970-01-01T00:00:00Z", 3.0},
-				{"1970-01-02T00:00:00Z", 12.0},
+				{"1970-01-01T00:00:00Z", 3.0, 3.0, 3.0, 1},
+				{"1970-01-02T00:00:00Z", 12.0, 12.0, 12.0, 1},
 			}},
 	}}
 
@@ -112,12 +121,19 @@ func Test_mergeResults(t *testing.T) {
 	assert.Equal(t, []float64{8, 12}, source.Next("sum_value_"))
 	source.Reset()
 
-	stmt := mustGetSelect(`SELECT sum("value") FROM sales where time < now() group by time(1d) `)
+	stmt := mustGetSelect(`SELECT mean("value"), top("value", 1), sum("value"), mean("value") * 3 FROM sales where time < now() group by time(1d) `)
 	tree, _, err := merge.NewQueryTree(stmt)
 	assert.NoError(t, err)
-	assert.Equal(t, []float64{8}, tree.Fields[0].Root.Next(source))
+	assert.Equal(t, []float64{4}, tree.Fields[0].Root.Next(source))
+	assert.Equal(t, []float64{5}, tree.Fields[1].Root.Next(source))
+	assert.Equal(t, []float64{8}, tree.Fields[2].Root.Next(source))
+	assert.Equal(t, []float64{12}, tree.Fields[3].Root.Next(source))
 	source.Step()
-	assert.Equal(t, []float64{20}, tree.Fields[0].Root.Next(source))
+	assert.Equal(t, []float64{10}, tree.Fields[0].Root.Next(source))
+	assert.Equal(t, []float64{12}, tree.Fields[1].Root.Next(source))
+	assert.Equal(t, []float64{20}, tree.Fields[2].Root.Next(source))
+	assert.Equal(t, []float64{30}, tree.Fields[3].Root.Next(source))
+	source.Reset()
 }
 
 func mustGetSelect(q string) *influxql.SelectStatement {
