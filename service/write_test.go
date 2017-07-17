@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"bytes"
 	"io/ioutil"
-	"regexp"
 )
 
 func TestRouting(t *testing.T) {

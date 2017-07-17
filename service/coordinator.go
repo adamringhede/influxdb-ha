@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 	"log"
-	"strings"
+	"github.com/davecgh/go-spew/spew"
 )
 
 // Coordinator handles a SELECT query using partition keys and a resolver.
@@ -24,16 +24,7 @@ type Coordinator struct {
 }
 
 func (c *Coordinator) Handle(stmt *influxql.SelectStatement, r *http.Request, db string) ([]result, error, *http.Response) {
-	// assuming that the query is only for one measurement and that all tag values are strings
-	// test if the query can be used with the measurement's partition key
-	// 	- at least one value has to be equal to each tag key
-	// create hashed values from the sorted combination of tags matching the key
-	//	- for multiple equal operators, one hash has to be created for each
-
-	// assuming that the query is a mean aggregation on one or more value
-	// create a strategy with the keys and information about each value to return and the source measurement
-
-	// merge the results using the strategy keys and aggregation method.
+	client := &http.Client{Timeout: 10 * time.Second}
 
 	measurements := findMeasurements(stmt.Sources)
 	// First assumption: one measurement, one query
@@ -45,24 +36,83 @@ func (c *Coordinator) Handle(stmt *influxql.SelectStatement, r *http.Request, db
 	pKey, ok := c.partitioner.GetKeyByMeasurement(msmt.Database, msmt.Name)
 	if ok {
 		//return []result{}, fmt.Errorf("The measurement %s - %s does not have a partition key", msmt.Database, msmt.Name), nil
-		numericHash, hashErr := c.partitioner.GetHash(pKey, getTagValues(stmt))
-		if hashErr != nil {
-			return []result{}, hashErr, nil
-		}
-		locations = c.resolver.FindByKey(numericHash, cluster.READ)
-		log.Printf("Sharding found locations %s", strings.Join(locations, ", "))
-	} else {
-		log.Printf("[Coordinator] Broadacasting. Measurement %s - %s does not have a partition key.", msmt.Database, msmt.Name)
-		locations = c.resolver.FindAll()
-	}
+		hashes := c.partitioner.GetHashes(pKey, getTagValues(stmt))
+		/*
+		TODO
+		- If the key is not fulfilled, n / rf nodes need to be queried as the data is partitioned and the query will need to reach all servers.
+		 */
 
-	// sending the query to only a single location does not work when broadcasting
-	// all servers / number of replicas have to be queried and results need to be merged.
-	selectedLocation := locations[rand.Intn(len(locations))]
-	log.Printf("Selecting location %s", selectedLocation)
-	client := &http.Client{Timeout: 10 * time.Second}
-	results, err, res := request(stmt, selectedLocation, client, r)
-	return results, err, res
+		allResults, err := performQuery(stmt, r, hashes, c.resolver, client)
+		if err != nil {
+			return []result{}, err, nil
+		}
+		spew.Dump(allResults)
+		// Merge allResults
+
+
+		//locations = c.resolver.FindByKey(numericHash, cluster.READ)
+		//log.Printf("Sharding found locations %s", strings.Join(locations, ", "))
+	} else {
+		log.Printf("[Coordinator] Measurement %s - %s does not have a partition key. Selecting any node.", msmt.Database, msmt.Name)
+		locations = c.resolver.FindAll()
+		selectedLocation := locations[rand.Intn(len(locations))]
+		log.Printf("Selecting location %s", selectedLocation)
+		return request(stmt, selectedLocation, client, r)
+	}
+	return []result{}, nil, nil
+}
+
+func performQuery(stmt *influxql.SelectStatement, r *http.Request, hashes []int, resolver *cluster.Resolver, client *http.Client) ([][]result, error) {
+	locationsAsked := map[string]bool{}
+	// TODO replace allResults with a channel.
+	allResults := [][]result{}
+	for _, hash := range hashes {
+		// If none of the locations for a certain hash can respond, then no result
+		// should be returned as it would be partial. This could be configured with an allowPartialResponses parameter.
+		var err error
+		for _, location := range resolver.FindByKey(hash, cluster.READ) {
+			if !locationsAsked[location] {
+				results, qErr, _ := request(stmt, location, client, r)
+				if qErr != nil {
+					err = qErr
+				} else {
+					locationsAsked[location] = true
+					allResults = append(allResults, results)
+					err = nil
+					break
+				}
+			} else {
+				break
+			}
+		}
+		if err != nil {
+			return allResults, err
+		}
+	}
+	return allResults, nil
+}
+
+func mergeResults(results []result, stmt *influxql.SelectStatement) result {
+	/*
+
+	SPREAD needs to be decomposed into MAX and MIN, and then merged.
+
+	MODE should behave like normal
+	MEDIAN and MEAN should both use an arithmetic mean
+
+	If the stmt is not performing grouping, aggregation or selection, it is
+	fine to just concatenate values and sort if necessary.
+
+	If there is only a single result, then just return it.
+	 */
+	if len(stmt.Dimensions) == 0 {
+		// This obviously does not work if on of the results is empty.
+		// And it needs to work with any amount of results as well
+		results[0].Series[0].Values = append(results[0].Series[0].Values, results[1].Series[0].Values...)
+	} else {
+		//
+	}
+	return results[0]
 }
 
 type valueConfig struct {

@@ -4,6 +4,8 @@ import (
 	"github.com/influxdata/influxdb/influxql"
 	"log"
 	"testing"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/influxdata/influxdb/coordinator"
 )
 
 func getSelectStatements(statements influxql.Statements) (result []*influxql.SelectStatement) {
@@ -29,6 +31,10 @@ func TestFindShard(t *testing.T) {
 	}
 
 	for _, stmt := range getSelectStatements(q.Statements) {
+		itrs, err := influxql.Select(stmt, coordinator.IteratorCreator{}, &influxql.SelectOptions{})
+		spew.Dump(itrs)
+		spew.Dump(err)
+		break
 		finder := &tagFinder{make(map[string]bool), make(map[string][]string)}
 		for _, condition := range findConditions(stmt) {
 			finder.findTags(condition)
