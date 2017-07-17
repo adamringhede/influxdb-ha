@@ -62,6 +62,7 @@ func NewQueryTree(stmt *influxql.SelectStatement) (*QueryTree, *QueryBuilder, er
 func createQueryNode(expr influxql.Expr, qb *QueryBuilder) (QueryNode, error) {
 	var n QueryNode
 	switch f := expr.(type) {
+	// TODO add support for wildcards and regular expressions
 	case *influxql.Call:
 		switch f.Name {
 		case "mean":
@@ -74,6 +75,28 @@ func createQueryNode(expr influxql.Expr, qb *QueryBuilder) (QueryNode, error) {
 		case "bottom":
 			count, _ := strconv.Atoi(f.Args[1].String())
 			n = NewBottom(f.Args[0].String(), count, qb)
+		case "max":
+			n = NewTop(f.Args[0].String(), 1, qb)
+		case "min":
+			n = NewBottom(f.Args[0].String(), 1, qb)
+		case "spread":
+			n = NewSpread(f.Args[0].String(), qb)
+		case "distinct":
+			n = NewDistinct(f.Args[0].String(), qb)
+		case "mode":
+			n = NewMode(f.Args[0].String(), qb)
+		case "count":
+			n = NewCount(f.Args[0].String(), qb)
+		// Aggregations
+		case "integral", "median", "stddev":
+			return nil, fmt.Errorf("Not yet supported")
+		// Selectors
+		case "sample", "percentile", "first", "last":
+			// First and Last can not be supported as
+			// Remember that for "sample", the the values timestamps will be returned
+			// which differs from the assumption that the timestamp is at the start of the group.
+			return nil, fmt.Errorf("Not yet supported")
+
 		default:
 			return nil, fmt.Errorf("InfluxQL function %s is not supported when merging results from multiple hosts.", f.Name)
 		}

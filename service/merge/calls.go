@@ -77,6 +77,55 @@ func (n *Bottom) Next(source ResultSource) []float64 {
 	return bottoms[:n.count]
 }
 
+type Spread struct {
+	maxs *Values
+	mins *Values
+}
+
+func NewSpread(fieldKey string, qb *QueryBuilder) *Spread {
+	return &Spread{
+		qb.Get("max(" + fieldKey + ")"),
+		qb.Get("min(" + fieldKey + ")"),
+	}
+}
+
+func (n *Spread) Next(source ResultSource) []float64 {
+	var max float64
+	for _, v := range n.maxs.Next(source) {
+		if v > max {
+			max = v
+		}
+	}
+	var min float64
+	for _, v := range n.mins.Next(source) {
+		if v < min {
+			max = v
+		}
+	}
+	return []float64{max-min}
+}
+
+type Distinct struct {
+	distinct *Values
+}
+
+func NewDistinct(fieldKey string, qb *QueryBuilder) *Distinct {
+	return &Distinct{
+		qb.Get("distinct(" + fieldKey + ")"),
+	}
+}
+
+func (n *Distinct) Next(source ResultSource) []float64 {
+	unique := map[float64]bool{}
+	for _, v := range n.distinct.Next(source) {
+		unique[v] = true
+	}
+	distinct := make([]float64, len(unique))
+	for v := range unique {
+		distinct = append(distinct, v)
+	}
+	return distinct
+}
 
 type Mean struct {
 	sums *Values
@@ -100,6 +149,51 @@ func (n *Mean) Next(source ResultSource) []float64 {
 		total += counts[i]
 	}
 	return []float64{weightedSum / total}
+}
+
+type Mode struct {
+	modes *Values
+}
+
+func NewMode(fieldKey string, qb *QueryBuilder) *Mode {
+	return &Mode{
+		qb.Get("mode(" + fieldKey + ")"),
+	}
+}
+
+func (n *Mode) Next(source ResultSource) []float64 {
+	modes := n.modes.Next(source)
+	m := map[float64]int{}
+	maxCount := 0
+	var mode float64
+	for _, value := range modes {
+		if _, ok := m[value]; !ok {
+			m[value] = 0
+		}
+		m[value] += 1
+		if m[value] > maxCount {
+			mode, maxCount = value, m[value]
+		}
+	}
+	return []float64{mode}
+}
+
+type Count struct {
+	counts *Values
+}
+
+func NewCount(fieldKey string, qb *QueryBuilder) *Count {
+	return &Count{
+		qb.Get("count(" + fieldKey + ")"),
+	}
+}
+
+func (n *Count) Next(source ResultSource) []float64 {
+	var sum float64
+	for _, v := range n.counts.Next(source) {
+		sum += float64(v)
+	}
+	return []float64{sum}
 }
 
 type Max struct {
