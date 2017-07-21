@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"time"
 	"log"
-	"github.com/davecgh/go-spew/spew"
+	"fmt"
+	"github.com/adamringhede/influxdb-ha/service/merge"
+	"github.com/influxdata/influxdb/models"
+	"strings"
 )
 
 // Coordinator handles a SELECT query using partition keys and a resolver.
@@ -23,7 +26,109 @@ type Coordinator struct {
 	partitioner *cluster.Partitioner
 }
 
-func (c *Coordinator) Handle(stmt *influxql.SelectStatement, r *http.Request, db string) ([]result, error, *http.Response) {
+func groupResultsByTags(allResults [][]Result) map[string][]Result {
+	groupedResults := map[string][]Result{}
+	// Group allResults by combination of tags
+	for _, results := range allResults {
+		for _, res := range results {
+			tagsKey := ""
+			for key, value := range res.Series[0].Tags {
+				tagsKey += key + "=" + value + ","
+			}
+			if _, ok := groupedResults[tagsKey]; !ok {
+				groupedResults[tagsKey] = []Result{}
+			}
+			groupedResults[tagsKey] = append(groupedResults[tagsKey], res)
+		}
+	}
+	return groupedResults
+}
+
+func timeGreaterThan(a, b string) bool {
+	ats, err := time.Parse(time.RFC3339Nano, a)
+	if err != nil {
+		log.Panic(err)
+	}
+	bts, err := time.Parse(time.RFC3339Nano, b)
+	if err != nil {
+		log.Panic(err)
+	}
+	return ats.Nanosecond() > bts.Nanosecond()
+}
+
+func mergeSortResults(groupedResults map[string][]Result) []Result {
+	mergedResults := []Result{}
+	for _, group := range groupedResults {
+		merged := Result{}
+		merged.Series = []*models.Row{{
+			Columns: []string{},
+			Values: [][]interface{}{},
+		}}
+		allDone := false
+		for !allDone {
+			min := group[0]
+			allDone = true
+			for _, result := range group {
+				if len(result.Series[0].Values) > 0 {
+					allDone = false
+				} else {
+					continue
+				}
+				if len(min.Series[0].Values) == 0 ||
+					!timeGreaterThan(result.Series[0].Values[0][0].(string), min.Series[0].Values[0][0].(string)) {
+					min = result
+				}
+			}
+			if len(min.Series[0].Values) > 0 {
+				merged.Series[0].Values = append(merged.Series[0].Values, min.Series[0].Values[0])
+				min.Series[0].Values = min.Series[0].Values[1:]
+			}
+		}
+		mergedResults = append(mergedResults, merged)
+
+	}
+	return mergedResults
+}
+
+func mergeQueryResults(groupedResults map[string][]Result, tree *merge.QueryTree) []Result {
+	mergedResults := []Result{}
+	for _, group := range groupedResults {
+		src := NewResultSource(group)
+		merged := Result{}
+		merged.Series = []*models.Row{{
+			Columns: []string{"time"},
+			Values: [][]interface{}{},
+		}}
+		for src.Reset(); !src.Done(); src.Step() {
+			for _, f := range tree.Fields {
+				merged.Series[0].Columns = append(merged.Series[0].Columns, f.ResponseField)
+			}
+
+			value := []interface{}{src.Time()}
+			for _, f := range tree.Fields {
+				switch f.Root.(type) {
+				case *merge.Top, *merge.Bottom:
+					// TODO Add support for adding multiple values. All other values should be nil.
+				}
+				value = append(value, f.Root.Next(src)[0])
+			}
+			merged.Series[0].Values = append(merged.Series[0].Values, value)
+		}
+		mergedResults = append(mergedResults, merged)
+	}
+	return mergedResults
+}
+
+func hasCall(stmt *influxql.SelectStatement) bool {
+	for _, field := range stmt.Fields {
+		if _, ok := field.Expr.(*influxql.Call); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Coordinator) Handle(stmt *influxql.SelectStatement, r *http.Request, db string) ([]Result, error, *http.Response) {
 	client := &http.Client{Timeout: 10 * time.Second}
 
 	measurements := findMeasurements(stmt.Sources)
@@ -35,44 +140,80 @@ func (c *Coordinator) Handle(stmt *influxql.SelectStatement, r *http.Request, db
 	var locations []string
 	pKey, ok := c.partitioner.GetKeyByMeasurement(msmt.Database, msmt.Name)
 	if ok {
-		//return []result{}, fmt.Errorf("The measurement %s - %s does not have a partition key", msmt.Database, msmt.Name), nil
-		hashes := c.partitioner.GetHashes(pKey, getTagValues(stmt))
-		/*
-		TODO
-		- If the key is not fulfilled, n / rf nodes need to be queried as the data is partitioned and the query will need to reach all servers.
-		 */
-
-		allResults, err := performQuery(stmt, r, hashes, c.resolver, client)
-		if err != nil {
-			return []result{}, err, nil
+		tagValues := getTagValues(stmt)
+		if !c.partitioner.FulfillsKey(pKey, tagValues) {
+			/*
+			TODO
+			If the key is not fulfilled, ideally n / rf nodes need to be queried as the data
+			is partitioned and the query will need to reach all servers.
+			However, finding those as well as the replicas if one fails is trickier.
+			 */
+			return []Result{}, fmt.Errorf("The partition key is not fulfilled given the tags."), nil
 		}
-		spew.Dump(allResults)
-		// Merge allResults
+		hashes := c.partitioner.GetHashes(pKey, tagValues)
 
+		if len(hashes) > 1 {
+			interval, err := stmt.GroupByInterval()
+			if err != nil {
+				return []Result{}, err, nil
+			}
+			// A selection with a call need to be handled differently as results from calls from different
+			// nodes need to be merged. However if there is not aggregation, it is enough to just merge
+			// the result and maintain sort.
+			if interval == 0 && !hasCall(stmt) {
+				allResults, err, response := performQuery(stmt.String(), r, hashes, c.resolver, client)
+				if err != nil {
+					return []Result{}, err, nil
+				}
+				groupedResults := groupResultsByTags(allResults)
+				mergedResults := mergeSortResults(groupedResults)
+				return mergedResults, nil, response
+			} else {
+				// Divide the query and merge the results
+				tree, qb, err := merge.NewQueryTree(stmt)
+				if err != nil {
+					return []Result{}, err, nil
+				}
+				s := qb.CreateStatement(stmt)
 
-		//locations = c.resolver.FindByKey(numericHash, cluster.READ)
-		//log.Printf("Sharding found locations %s", strings.Join(locations, ", "))
+				allResults, err, response := performQuery(s, r, hashes, c.resolver, client)
+				if err != nil {
+					return []Result{}, err, nil
+				}
+
+				groupedResults := groupResultsByTags(allResults)
+				mergedResults := mergeQueryResults(groupedResults, tree)
+				return mergedResults, nil, response
+			}
+		} else {
+			locations = c.resolver.FindByKey(hashes[0], cluster.READ)
+			log.Printf("Sharding found single locations %s", strings.Join(locations, ", "))
+			selectedLocation := locations[rand.Intn(len(locations))]
+			return request(stmt.String(), selectedLocation, client, r)
+		}
 	} else {
 		log.Printf("[Coordinator] Measurement %s - %s does not have a partition key. Selecting any node.", msmt.Database, msmt.Name)
 		locations = c.resolver.FindAll()
 		selectedLocation := locations[rand.Intn(len(locations))]
 		log.Printf("Selecting location %s", selectedLocation)
-		return request(stmt, selectedLocation, client, r)
+		return request(stmt.String(), selectedLocation, client, r)
 	}
-	return []result{}, nil, nil
+	return []Result{}, nil, nil
 }
 
-func performQuery(stmt *influxql.SelectStatement, r *http.Request, hashes []int, resolver *cluster.Resolver, client *http.Client) ([][]result, error) {
+func performQuery(stmt string, r *http.Request, hashes []int, resolver *cluster.Resolver, client *http.Client) ([][]Result, error, *http.Response) {
 	locationsAsked := map[string]bool{}
-	// TODO replace allResults with a channel.
-	allResults := [][]result{}
+	// TODO replace allResults with a channel and make requests in parallel.
+	allResults := [][]Result{}
+	var response *http.Response
 	for _, hash := range hashes {
-		// If none of the locations for a certain hash can respond, then no result
+		// If none of the locations for a certain hash can respond, then no Result
 		// should be returned as it would be partial. This could be configured with an allowPartialResponses parameter.
 		var err error
 		for _, location := range resolver.FindByKey(hash, cluster.READ) {
 			if !locationsAsked[location] {
-				results, qErr, _ := request(stmt, location, client, r)
+				results, qErr, res := request(stmt, location, client, r)
+				response = res
 				if qErr != nil {
 					err = qErr
 				} else {
@@ -86,33 +227,10 @@ func performQuery(stmt *influxql.SelectStatement, r *http.Request, hashes []int,
 			}
 		}
 		if err != nil {
-			return allResults, err
+			return allResults, err, response
 		}
 	}
-	return allResults, nil
-}
-
-func mergeResults(results []result, stmt *influxql.SelectStatement) result {
-	/*
-
-	SPREAD needs to be decomposed into MAX and MIN, and then merged.
-
-	MODE should behave like normal
-	MEDIAN and MEAN should both use an arithmetic mean
-
-	If the stmt is not performing grouping, aggregation or selection, it is
-	fine to just concatenate values and sort if necessary.
-
-	If there is only a single result, then just return it.
-	 */
-	if len(stmt.Dimensions) == 0 {
-		// This obviously does not work if on of the results is empty.
-		// And it needs to work with any amount of results as well
-		results[0].Series[0].Values = append(results[0].Series[0].Values, results[1].Series[0].Values...)
-	} else {
-		//
-	}
-	return results[0]
+	return allResults, nil, response
 }
 
 type valueConfig struct {
@@ -216,4 +334,89 @@ func findMeasurements(srcs []influxql.Source) []*influxql.Measurement {
 		}
 	}
 	return measurements
+}
+
+type ResultSource struct {
+	data         []resultGroup
+	fieldIndices map[string]int
+	i            int
+}
+
+type resultGroup struct {
+	time   string
+	values []interface{}
+}
+
+func NewResultSource(results []Result) *ResultSource {
+	source := &ResultSource{
+		data:         []resultGroup{},
+		fieldIndices: map[string]int{},
+	}
+
+	// Group values by time and ensure order. This assumes that both results have the exact same time-steps and
+	// that times are strings.
+	a := map[string]int{}
+	ai := 0
+	for _, res := range results {
+		for _, series := range res.Series {
+			for _, v := range series.Values {
+				k := string(v[0].(string))
+				if _, ok := a[k]; !ok {
+					source.data = append(source.data, resultGroup{k, []interface{}{}})
+					a[k] = ai
+					ai += 1
+				}
+				group := source.data[a[k]]
+				source.data[a[k]].values = append(group.values, v)
+			}
+		}
+	}
+
+	for i, col := range results[0].Series[0].Columns {
+		source.fieldIndices[col] = i
+	}
+
+	return source
+}
+
+func (s *ResultSource) Next(fieldKey string) []float64 {
+	res := make([]float64, len(s.data[s.i].values))
+	fieldIndex, fieldExists := s.fieldIndices[fieldKey]
+	if !fieldExists {
+		panic(fmt.Errorf("No values exist for field key %s", fieldKey))
+	}
+	if s.Done() {
+		return res
+	}
+	for i, v := range s.data[s.i].values {
+		if data, ok := v.([]interface{}); ok {
+			switch value := data[fieldIndex].(type) {
+			case int: res[i] = float64(value)
+			case float64: res[i] = value
+			default:
+				panic(fmt.Errorf("Unsupported type %T", value))
+			}
+
+		}
+	}
+	return res
+}
+
+func (s *ResultSource) Time() string {
+	if s.Done() {
+		return ""
+	}
+	return s.data[s.i].time
+}
+
+func (s *ResultSource) Step() {
+	s.i += 1
+}
+
+func (s *ResultSource) Done() bool {
+	return s.i >= len(s.data)
+}
+
+func (s *ResultSource) Reset() {
+	s.i = 0
 }

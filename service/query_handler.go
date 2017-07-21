@@ -16,22 +16,22 @@ import (
 	"strings"
 )
 
-// Message represents a user-facing message to be included with the result.
-type message struct {
+// Message represents a user-facing Message to be included with the Result.
+type Message struct {
 	Level string `json:"level"`
 	Text  string `json:"text"`
 }
 
-type result struct {
+type Result struct {
 	StatementID int           `json:"statement_id"`
 	Series      []*models.Row `json:"series,omitempty"`
-	Messages    []*message    `json:"messages,omitempty"`
+	Messages    []*Message    `json:"messages,omitempty"`
 	Partial     bool          `json:"partial,omitempty"`
 	Err         string        `json:"error,omitempty"`
 }
 
 type response struct {
-	Results []result `json:"results"`
+	Results []Result `json:"results"`
 }
 
 func parseResp(resp *http.Response, chunked bool) response {
@@ -72,7 +72,7 @@ func jsonError(w http.ResponseWriter, code int, message string) {
 	w.Write([]byte(data))
 }
 
-func respondWithResults(w *http.ResponseWriter, results []result) {
+func respondWithResults(w *http.ResponseWriter, results []Result) {
 	(*w).Header().Set("Content-Type", "application/json")
 	data, _ := json.Marshal(response{results})
 	(*w).Header().Add("X-InfluxDB-Version", "relay")
@@ -86,13 +86,13 @@ func handleRouteError(target string, err error) {
 	}
 }
 
-func request(statement influxql.Statement, host string, client *http.Client, r *http.Request) ([]result, error, *http.Response) {
+func request(statement string, host string, client *http.Client, r *http.Request) ([]Result, error, *http.Response) {
 	baseUrl, _ := url.Parse("http://" + host + r.URL.Path)
 	queryValues := r.URL.Query()
-	queryValues.Set("q", statement.String())
-	baseUrl.RawQuery = r.URL.Query().Encode()
+	queryValues.Set("q", statement)
+	baseUrl.RawQuery = queryValues.Encode()
 	res, err := client.Post(baseUrl.String(), "", r.Body)
-	results := []result{}
+	results := []Result{}
 	if err != nil {
 		log.Println(err)
 		return results, err, res
@@ -114,7 +114,7 @@ type QueryHandler struct {
 func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	queryParam := r.URL.Query().Get("q")
 	if queryParam != "" {
-		allResults := []result{}
+		allResults := []Result{}
 		q, parseErr := influxql.ParseQuery(r.URL.Query()["q"][0])
 		db := r.URL.Query()["db"][0]
 		if db == "" {
@@ -153,7 +153,7 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// TODO Ping all replicas to make sure they are reachable before making a meta query.
 				// ..return an error if not.
 				for _, location := range h.resolver.FindAll() {
-					results, err, res := request(s, location, h.client, r)
+					results, err, res := request(s.String(), location, h.client, r)
 					if err != nil {
 						// We may want to handle errors differently
 						// Eg. with a retry,
@@ -188,7 +188,7 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				for ri, location := range all {
 					// Try requesting every single replica. Only if last one fails
 					// return an error.
-					results, err, res := request(s, location, h.client, r)
+					results, err, res := request(s.String(), location, h.client, r)
 					if ri == len(all)-1 && err != nil {
 						passBack(&w, res)
 						continue
@@ -211,7 +211,7 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				for ri, location := range all {
 					// Try requesting every single replica. Only if last one fails
 					// return an error.
-					results, err, res := request(s, location, h.client, r)
+					results, err, res := request(s.String(), location, h.client, r)
 					if ri == len(all)-1 && err != nil {
 						passBack(&w, res)
 						continue
@@ -243,7 +243,7 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// TODO
 				// if chunked=true, stream results to the response writer instead of
 				// accumulating all of them and waiting until last is done.
-				// However, the result should only be flushed after a response
+				// However, the Result should only be flushed after a response
 				// has been received from every shard and merged if needed.
 				// http://stackoverflow.com/questions/26769626/send-a-chunked-http-response-from-a-go-server
 				// Chunking with partial series works as well if grouping on time. If no grouping,

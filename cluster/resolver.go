@@ -13,8 +13,8 @@ type Resolver struct {
 	collection *PartitionCollection
 	// nodes is a set of nodes. It is managed by AddToken and RemoveToken. It should never be
 	// changed outside of those functions.
-	nodes      map[*Node]int
-	replicationFactor int
+	nodes             map[*Node]int
+	ReplicationFactor int
 }
 
 func NewResolver() *Resolver {
@@ -25,7 +25,7 @@ func NewResolver() *Resolver {
 // On reads, it will not return nodes with status "syncing"
 // However, on writes it will return "syncing" nodes so that they can catch up.
 func (r *Resolver) FindByKey(key int, purpose int) []string {
-	partitions := r.collection.GetMultiple(key, r.replicationFactor)
+	partitions := r.collection.GetMultiple(key, r.ReplicationFactor)
 	locationMap := make(map[string]bool)
 	for _, p := range partitions {
 		locationMap[p.Node.DataLocation] = true
@@ -50,7 +50,7 @@ func (r *Resolver) FindPrimary(key int) *Node {
 }
 
 func (r *Resolver) ReverseSecondaryLookup(key int) []int {
-	if r.replicationFactor == 1 {
+	if r.ReplicationFactor == 1 {
 		return []int{key}
 	}
 	// If the caller has a sorted list of keys, it is trivial to avoid an n^2 complexity by optimizing this.
@@ -60,7 +60,7 @@ func (r *Resolver) ReverseSecondaryLookup(key int) []int {
 		if p.(*Partition).Token == key {
 			continue
 		}
-		targets := r.collection.GetMultiple(p.(*Partition).Token, r.replicationFactor)
+		targets := r.collection.GetMultiple(p.(*Partition).Token, r.ReplicationFactor)
 		for _, other := range targets {
 			if other.Token == key {
 				tokens = append(tokens, p.(*Partition).Token)

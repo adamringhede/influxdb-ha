@@ -9,84 +9,6 @@ import (
 	"testing"
 )
 
-type ResultSourceMock struct {
-	data         []resultGroup
-	fieldIndices map[string]int
-	i            int
-}
-
-type resultGroup struct {
-	time   string
-	values []interface{}
-}
-
-func NewResultSourceMock(results []result) *ResultSourceMock {
-	source := &ResultSourceMock{
-		data:         []resultGroup{},
-		fieldIndices: map[string]int{},
-	}
-
-	// Group values by time and ensure order. This assumes that both results have the exact same time-steps and
-	// that times are strings.
-	a := map[string]int{}
-	ai := 0
-	for _, res := range results {
-		for _, series := range res.Series {
-			for _, v := range series.Values {
-				k := string(v[0].(string))
-				if _, ok := a[k]; !ok {
-					source.data = append(source.data, resultGroup{k, []interface{}{}})
-					a[k] = ai
-					ai += 1
-				}
-				group := source.data[a[k]]
-				source.data[a[k]].values = append(group.values, v)
-			}
-		}
-	}
-
-	for i, col := range results[0].Series[0].Columns {
-		source.fieldIndices[col] = i
-	}
-
-	return source
-}
-
-func (s *ResultSourceMock) Next(fieldKey string) []float64 {
-	res := make([]float64, len(s.data[s.i].values))
-	fieldIndex, fieldExists := s.fieldIndices[fieldKey]
-	if !fieldExists {
-		panic(fmt.Errorf("No values exist for field key %s", fieldKey))
-	}
-	if s.Done() {
-		return res
-	}
-	for i, v := range s.data[s.i].values {
-		if data, ok := v.([]interface{}); ok {
-			switch value := data[fieldIndex].(type) {
-			case int: res[i] = float64(value)
-			case float64: res[i] = value
-			default:
-				panic(fmt.Errorf("Unsupported type %T", value))
-			}
-
-		}
-	}
-	return res
-}
-
-func (s *ResultSourceMock) Step() {
-	s.i += 1
-}
-
-func (s *ResultSourceMock) Done() bool {
-	return s.i >= len(s.data)
-}
-
-func (s *ResultSourceMock) Reset() {
-	s.i = 0
-}
-
 func Test_buildTree(t *testing.T) {
 	stmt := mustGetSelect(`SELECT top("foo", 2), mean("value") FROM sales where time < now() group by time(1h) `)
 	_, _, err := merge.NewQueryTree(stmt)
@@ -95,7 +17,7 @@ func Test_buildTree(t *testing.T) {
 
 func Test_mergeResults(t *testing.T) {
 
-	a := result{Series: []*models.Row{
+	a := Result{Series: []*models.Row{
 		{
 			Columns: []string{"time", "sum_value_", "top_value__1_", "mean_value_", "count_value_"},
 			Values: [][]interface{}{
@@ -104,7 +26,7 @@ func Test_mergeResults(t *testing.T) {
 			}},
 	}}
 
-	b := result{Series: []*models.Row{
+	b := Result{Series: []*models.Row{
 		{
 			Columns: []string{"time", "sum_value_", "top_value__1_", "mean_value_", "count_value_"},
 			Values: [][]interface{}{
@@ -114,7 +36,7 @@ func Test_mergeResults(t *testing.T) {
 	}}
 
 	// The results have toe be grouped by tags
-	source := NewResultSourceMock([]result{a, b})
+	source := NewResultSource([]Result{a, b})
 
 	assert.Equal(t, []float64{5, 3}, source.Next("sum_value_"))
 	source.Step()
@@ -157,3 +79,11 @@ func getSelectStatements(statements influxql.Statements) (result []*influxql.Sel
 	}
 	return result
 }
+
+
+/*
+TODO Testing
+Need two or three instances,
+Test when an instance is unreachable (the randomness need to be seeded)
+	For instance, the resolver should be able to select one and it should have a parameter for a seed.
+ */

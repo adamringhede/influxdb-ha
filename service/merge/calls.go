@@ -67,7 +67,7 @@ func (n *Bottom) Next(source ResultSource) []float64 {
 		minIndex := i
 		minValue := bottoms[i]
 		for j := i + 1; j < len(bottoms); j++ {
-			if bottoms[j] > minValue {
+			if bottoms[j] < minValue {
 				minIndex = j
 				minValue = bottoms[j]
 				bottoms[i], bottoms[minIndex] = bottoms[minIndex], bottoms[i]
@@ -142,13 +142,13 @@ func NewMean(fieldKey string, qb *QueryBuilder) *Mean {
 func (n *Mean) Next(source ResultSource) []float64 {
 	sums := n.sums.Next(source)
 	counts := n.counts.Next(source)
-	var weightedSum float64
-	var total float64
+	var totalSum float64
+	var totalCount float64
 	for i, sum := range sums {
-		weightedSum += sum * counts[i]
-		total += counts[i]
+		totalSum += sum
+		totalCount += counts[i]
 	}
-	return []float64{weightedSum / total}
+	return []float64{totalSum / totalCount}
 }
 
 type Mode struct {
@@ -191,7 +191,7 @@ func NewCount(fieldKey string, qb *QueryBuilder) *Count {
 func (n *Count) Next(source ResultSource) []float64 {
 	var sum float64
 	for _, v := range n.counts.Next(source) {
-		sum += float64(v)
+		sum += v
 	}
 	return []float64{sum}
 }
@@ -219,7 +219,7 @@ func NewSum(fieldKey string, qb *QueryBuilder) *Sum {
 }
 
 func (n *Sum) Next(source ResultSource) []float64 {
-	sum := 0.0
+	var sum float64 = 0
 	for _, v := range n.sums.Next(source) {
 		sum += v
 	}

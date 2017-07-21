@@ -5,6 +5,7 @@ import (
 	"strings"
 	"fmt"
 	"strconv"
+	"bytes"
 )
 
 type ResultSource interface {
@@ -39,6 +40,61 @@ func (qb *QueryBuilder) Get(expr string) *Values {
 	return &Values{qb.Fields[expr]}
 }
 
+func (qb *QueryBuilder) CreateStatement(s *influxql.SelectStatement) string {
+	var buf bytes.Buffer
+	_, _ = buf.WriteString("SELECT ")
+	for field, name := range qb.Fields {
+		_, _ = buf.WriteString(field + " AS " + name + ",")
+	}
+	// Remove comma
+	buf.Truncate(buf.Len() - 1)
+
+	if s.Target != nil {
+		_, _ = buf.WriteString(" ")
+		_, _ = buf.WriteString(s.Target.String())
+	}
+	if len(s.Sources) > 0 {
+		_, _ = buf.WriteString(" FROM ")
+		_, _ = buf.WriteString(s.Sources.String())
+	}
+	if s.Condition != nil {
+		_, _ = buf.WriteString(" WHERE ")
+		_, _ = buf.WriteString(s.Condition.String())
+	}
+	if len(s.Dimensions) > 0 {
+		_, _ = buf.WriteString(" GROUP BY ")
+		_, _ = buf.WriteString(s.Dimensions.String())
+	}
+	switch s.Fill {
+	case influxql.NoFill:
+		_, _ = buf.WriteString(" fill(none)")
+	case influxql.NumberFill:
+		_, _ = buf.WriteString(fmt.Sprintf(" fill(%v)", s.FillValue))
+	case influxql.LinearFill:
+		_, _ = buf.WriteString(" fill(linear)")
+	case influxql.PreviousFill:
+		_, _ = buf.WriteString(" fill(previous)")
+	}
+	if len(s.SortFields) > 0 {
+		_, _ = buf.WriteString(" ORDER BY ")
+		_, _ = buf.WriteString(s.SortFields.String())
+	}
+	if s.Limit > 0 {
+		_, _ = fmt.Fprintf(&buf, " LIMIT %d", s.Limit)
+	}
+	if s.Offset > 0 {
+		_, _ = buf.WriteString(" OFFSET ")
+		_, _ = buf.WriteString(strconv.Itoa(s.Offset))
+	}
+	if s.SLimit > 0 {
+		_, _ = fmt.Fprintf(&buf, " SLIMIT %d", s.SLimit)
+	}
+	if s.SOffset > 0 {
+		_, _ = fmt.Fprintf(&buf, " SOFFSET %d", s.SOffset)
+	}
+	return buf.String()
+}
+
 type QueryTree struct {
 	Fields []QueryField
 }
@@ -48,7 +104,7 @@ func NewQueryTree(stmt *influxql.SelectStatement) (*QueryTree, *QueryBuilder, er
 	tree.Fields = []QueryField{}
 	qb := NewQueryBuilder()
 	for _, field := range stmt.Fields {
-		qField := QueryField{ResponseField:field.Name()}
+		qField := QueryField{ResponseField: field.Name()}
 		node, err := createQueryNode(field.Expr, qb)
 		if err != nil {
 			return nil, nil, err
@@ -87,18 +143,19 @@ func createQueryNode(expr influxql.Expr, qb *QueryBuilder) (QueryNode, error) {
 			n = NewMode(f.Args[0].String(), qb)
 		case "count":
 			n = NewCount(f.Args[0].String(), qb)
-		// Aggregations
-		case "integral", "median", "stddev":
-			return nil, fmt.Errorf("Not yet supported")
-		// Selectors
-		case "sample", "percentile", "first", "last":
-			// First and Last can not be supported as
-			// Remember that for "sample", the the values timestamps will be returned
-			// which differs from the assumption that the timestamp is at the start of the group.
-			return nil, fmt.Errorf("Not yet supported")
-
 		default:
-			return nil, fmt.Errorf("InfluxQL function %s is not supported when merging results from multiple hosts.", f.Name)
+			/*
+			Not supported:
+			integral, median, stddev, sample, percentile, first, last
+			as well as all transformations
+
+			First and Last can not be supported as ResultSource.Next only return values and
+			not the timestamps of those value. Need a different function than next that also
+			includes the time.
+			Remember that for "sample", the the values timestamps will be returned
+			which ´differs from the assumption that the timestamp is at the start of the group.
+			*/
+			return nil, fmt.Errorf("InfluxQL function '%s' is not supported when merging results from multiple hosts.", f.Name)
 		}
 	case *influxql.BinaryExpr:
 		lhs, err := createQueryNode(f.LHS, qb)
@@ -114,6 +171,12 @@ func createQueryNode(expr influxql.Expr, qb *QueryBuilder) (QueryNode, error) {
 		n = NewFloatLit(float64(f.Val))
 	case *influxql.NumberLiteral:
 		n = NewFloatLit(f.Val)
+	case *influxql.ParenExpr:
+		expr, err := createQueryNode(f.Expr, qb)
+		if err != nil {
+			return nil, err
+		}
+		n = expr
 	default:
 		return nil, fmt.Errorf("Unknown expression '%s' of type %T", f.String(), f)
 	}

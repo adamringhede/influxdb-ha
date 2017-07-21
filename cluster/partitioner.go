@@ -99,6 +99,9 @@ func (p *Partitioner) RemoveKey(key PartitionKey) {
 
 func (p *Partitioner) GetKeyByMeasurement(db string, msmt string) (PartitionKey, bool) {
 	key, ok := p.partitionKeys[db + "." + msmt]
+	if !ok {
+		key, ok = p.partitionKeys[db]
+	}
 	return key, ok
 }
 
