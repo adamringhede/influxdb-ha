@@ -35,4 +35,13 @@ func TestRouting(t *testing.T) {
 TODO Test hinted hand off
 TODO Test retries
 TODO Test different configurations
+
+
+- Hinted hand-off
+It can be implemented by storing the data in a local data structure in memory by appending failed writes to it.
+No need for gossip here. Instead, it can try to connect to the data node with a health check with an exponential
+back off up to 10 minutes.
+
+
+
  */

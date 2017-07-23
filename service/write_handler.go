@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"time"
 	"errors"
+	"github.com/coreos/etcd/clientv3/concurrency"
+	"sync"
 )
 
 type WriteHandler struct {
@@ -68,6 +70,7 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					key.Measurement, strings.Join(key.Tags, ", ")))
 				return
 			}
+			// TODO add support for multiple
 			numericHash, hashErr := h.partitioner.GetHash(key, values)
 			if hashErr != nil {
 				jsonError(w, http.StatusInternalServerError, "failed to partition write")
@@ -76,7 +79,8 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if _, ok := pointGroups[numericHash]; !ok {
 				pointGroups[numericHash] = []models.Point{}
 			}
-			// TODO floor the numericHash to an actual token value. This is required for importing to work as it is not possible to query ranges.
+			// Add the partition token resolved from the hash. This is needed when adding or removing nodes to find data
+			// to import for reassigned tokens.
 			partition := h.resolver.GetPartition(numericHash)
 			if partition == nil {
 				log.Panicf("Could not find partition for key %d. Something is wrong with the resolver.", numericHash)
@@ -88,32 +92,40 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// get locations to write each each group of points.
-
 	encodedQuery := query.Encode()
 	auth := r.Header.Get("Authorization")
 
-	// TODO to all requests in parallel
+	wg := sync.WaitGroup{}
 
 	if len(broadcastGroup) > 0 {
+		wg.Add(1)
 		locations := h.resolver.FindAll()
 		log.Printf("Broacasting write partitioned data to %s", strings.Join(locations, ", "))
 		broadcastData := convertPointToBytes(broadcastGroup, precision)
-		relayErr := h.relayToLocations(locations, encodedQuery, auth, broadcastData)
-		if relayErr != nil {
-			panic(relayErr)
-		}
+		go (func() {
+			relayErr := h.relayToLocations(locations, encodedQuery, auth, broadcastData)
+			if relayErr != nil {
+				panic(relayErr)
+			}
+			wg.Done()
+		})()
 	}
 
+	wg.Add(len(pointGroups))
 	for numericHash, points := range pointGroups {
-		data := convertPointToBytes(points, precision)
-		locations := h.resolver.FindByKey(numericHash, cluster.READ)
-		log.Printf("Writing partitioned data to %s", strings.Join(locations, ", "))
-		relayErr := h.relayToLocations(locations, encodedQuery, auth, data)
-		if relayErr != nil {
-			panic(relayErr)
-		}
+		go (func(){
+			data := convertPointToBytes(points, precision)
+			locations := h.resolver.FindByKey(numericHash, cluster.WRITE)
+			log.Printf("Writing partitioned data to %s", strings.Join(locations, ", "))
+			relayErr := h.relayToLocations(locations, encodedQuery, auth, data)
+			if relayErr != nil {
+				panic(relayErr)
+			}
+			wg.Done()
+		})()
 	}
+
+	wg.Wait()
 
 	w.WriteHeader(http.StatusNoContent)
 
