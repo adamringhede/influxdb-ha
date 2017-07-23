@@ -71,7 +71,7 @@ func main() {
 	tokensMap, err := tokenStorage.Get()
 	handleErr(err)
 
-	// get nodes as a map
+	// store nodes as a map
 	nodesMap := make(map[string]*cluster.Node, len(nodes))
 	for _, node := range nodes {
 		nodesMap[node.Name] = node
@@ -253,8 +253,11 @@ func deleteTokensData(tokenLocations map[int]*cluster.Node) {
 	/*
 	this should just add a job in a queue to be picked up by the agent running at that node.
 	that is if we want to be able to add a new node while another one is unavailable.
-	if this is not a requirement, we can just make the delete request here
-	and hope for the best.
+	if this is not a requirement, we can just make the delete request here.
+	The danger with having the same data on multiple locations without intended replication,
+	queries merging data from multiple nodes may receive incorrect results.
+	This could however be avoided by filtering on partitionToken for those that should be on that
+	node. An alternative is to have a background job that clears out data from nodes where it should not be.
 	*/
 	g := sync.WaitGroup{}
 	g.Add(len(tokenLocations))

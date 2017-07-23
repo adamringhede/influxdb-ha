@@ -51,8 +51,7 @@ func (l *httpLoader) stream(q, location, db string, chunked bool) {
 // Import data given a set of tokens. The tokens should include those stolen from
 // other nodes as well as token for which this node is holding replicated data
 func (i *BasicImporter) Import(tokens []int, resolver *cluster.Resolver, target string) {
-	// TODO import and create databases, retention policies, and users.
-	// TODO handle consistency issues with different retention policy versions.
+	// TODO import and create retention policies and users.
 	// we may want to save retention policies and users in ETCD as a single source of truth.
 	// we can also keep a backlog of items for each node that could not succeed in an update
 	//	in that way the node can update its current state incrementally.
@@ -112,7 +111,7 @@ func (i *BasicImporter) Import(tokens []int, resolver *cluster.Resolver, target 
 					}
 				}
 			}
-			// TODO find a better way to structure this to handle errors
+			// TODO find a better way to structure this to handle errors instead of panic.
 			break
 		}
 	}

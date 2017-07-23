@@ -10,6 +10,7 @@ const (
 // so that it can potentially be replaced to support
 // a different one.
 type Resolver struct {
+	// TODO add collection for reserved tokens which are used when writing
 	collection *PartitionCollection
 	// nodes is a set of nodes. It is managed by AddToken and RemoveToken. It should never be
 	// changed outside of those functions.
@@ -70,6 +71,7 @@ func (r *Resolver) ReverseSecondaryLookup(key int) []int {
 	return tokens
 }
 
+// TODO find all should also include nodes with only reserved tokens.
 func (r *Resolver) FindAll() []string {
 	locations := []string{}
 	for node, _ := range r.nodes {
