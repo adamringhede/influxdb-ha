@@ -48,6 +48,7 @@ func main() {
 	})
 	handleErr(etcdErr)
 
+	// TODO Only default to hostname, prefer using a configurable id
 	nodeName, hostErr := os.Hostname()
 	handleErr(hostErr)
 	nodeStorage := cluster.NewEtcdNodeStorage(c)
@@ -139,24 +140,6 @@ func main() {
 		}
 	})()
 
-	if isNew {
-		mtx, err := tokenStorage.Lock()
-		handleErr(err)
-		isFirstNode, err := tokenStorage.InitMany(localNode.Name, 16)
-		if err != nil {
-			log.Println("Intitation of tokens failed")
-			handleErr(err)
-		}
-		if !isFirstNode {
-			// TODO start http service so that this node can receive writes while it is joining.
-			err = join(localNode, tokenStorage, resolver)
-			handleErr(err)
-		}
-		mtx.Unlock(context.Background())
-	} else {
-		// TODO check if importing data, if so, then resume.
-	}
-
 	httpConfig := service.Config{
 		BindAddr: *bindClientAddr,
 		BindPort: *bindClientPort,
@@ -169,13 +152,41 @@ func main() {
 		Measurement: "treasures",
 		Tags:        []string{"type"},
 	})
-	service.Start(resolver, partitioner, httpConfig)
+	// Starting the service here so that the node can receive writes while joining.
+	go service.Start(resolver, partitioner, httpConfig)
+
+	if isNew {
+		mtx, err := tokenStorage.Lock()
+		handleErr(err)
+		isFirstNode, err := tokenStorage.InitMany(localNode.Name, 16)
+		if err != nil {
+			log.Println("Intitation of tokens failed")
+			handleErr(err)
+		}
+		if !isFirstNode {
+			err = join(localNode, tokenStorage, resolver)
+			handleErr(err)
+		}
+		mtx.Unlock(context.Background())
+	} else {
+		// TODO check if importing data, if so, then resume.
+	}
+
+	// Sleep forever
+	select {}
+}
+
+func tokensToString(tokens []int, sep string) string {
+	res := make([]string, len(tokens))
+	for i, token := range tokens {
+		res[i] = strconv.Itoa(token)
+	}
+	return strings.Join(res, sep)
 }
 
 func join(localNode *cluster.Node, tokenStorage *cluster.EtcdTokenStorage, resolver *cluster.Resolver) error {
 	toSteal, err := tokenStorage.SuggestReservations()
-	log.Printf("Stealing %d tokens", len(toSteal))
-	log.Println(toSteal)
+	log.Printf("Stealing %d tokens: [%s]", len(toSteal), tokensToString(toSteal, " "))
 	if err != nil {
 		return err
 	}

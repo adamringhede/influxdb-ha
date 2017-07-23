@@ -17,19 +17,19 @@ const testDB = "sharded"
 
 func TestQueryHandler_Coordinator_DistributeQueryAndAggregateResults(t *testing.T) {
 	clnt := setUpSelectTest()
-	res := mustQuery(clnt, `select mean(value) from treasures WHERE time <= now() AND type = 'gold' OR type = 'trash' GROUP BY time(1d)`)
+	res := mustQuery(clnt, `select mean(value) from treasures WHERE time <= now() AND (type = 'gold' OR type = 'trash') GROUP BY time(1d) LIMIT 1`)
 	assert.Equal(t, json.Number("50"), res[0].Series[0].Values[0][1])
 }
 
 func TestQueryHandler_Coordinator_SingleNode(t *testing.T) {
 	clnt := setUpSelectTest()
-	res := mustQuery(clnt, `select mean(value) from treasures WHERE time <= now() AND type = 'gold' GROUP BY time(1d)`)
+	res := mustQuery(clnt, `select mean(value) from treasures WHERE time <= now() AND type = 'gold' GROUP BY time(1d) LIMIT 1`)
 	assert.Equal(t, json.Number("100"), res[0].Series[0].Values[0][1])
 }
 
 func TestQueryHandler_Coordinator_NoGroupingMultipleNodes(t *testing.T) {
 	clnt := setUpSelectTest()
-	res := mustQuery(clnt, `select value from treasures WHERE time <= now() AND type = 'gold' OR type = 'silver' OR type = 'trash'`)
+	res := mustQuery(clnt, `select value from treasures WHERE time <= now() AND (type = 'gold' OR type = 'silver' OR type = 'trash')`)
 	assert.Len(t, res[0].Series[0].Values, 3)
 }
 
@@ -85,6 +85,7 @@ func newPartitioner() *cluster.Partitioner {
 }
 
 func newPoint(tag string, value float64) *influx.Point {
+
 	pt, err := influx.NewPoint(
 		"treasures",
 		map[string]string{
@@ -93,7 +94,7 @@ func newPoint(tag string, value float64) *influx.Point {
 		map[string]interface{}{
 			"value": value,
 		},
-		time.Now(),
+		time.Now().AddDate(0, 0, -1),
 	)
 	if err != nil {
 		log.Fatal(err)

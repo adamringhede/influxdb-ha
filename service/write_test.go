@@ -30,3 +30,9 @@ func TestRouting(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 200, resp.StatusCode)
 }
+
+/*
+TODO Test hinted hand off
+TODO Test retries
+TODO Test different configurations
+ */

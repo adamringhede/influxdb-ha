@@ -32,8 +32,10 @@ func groupResultsByTags(allResults [][]Result) map[string][]Result {
 	for _, results := range allResults {
 		for _, res := range results {
 			tagsKey := ""
-			for key, value := range res.Series[0].Tags {
-				tagsKey += key + "=" + value + ","
+			if len(res.Series) > 0 {
+				for key, value := range res.Series[0].Tags {
+					tagsKey += key + "=" + value + ","
+				}
 			}
 			if _, ok := groupedResults[tagsKey]; !ok {
 				groupedResults[tagsKey] = []Result{}
@@ -206,11 +208,19 @@ func performQuery(stmt string, r *http.Request, hashes []int, resolver *cluster.
 	// TODO replace allResults with a channel and make requests in parallel.
 	allResults := [][]Result{}
 	var response *http.Response
-	for _, hash := range hashes {
+	hashLoop: for _, hash := range hashes {
 		// If none of the locations for a certain hash can respond, then no Result
 		// should be returned as it would be partial. This could be configured with an allowPartialResponses parameter.
 		var err error
-		for _, location := range resolver.FindByKey(hash, cluster.READ) {
+		locations := resolver.FindByKey(hash, cluster.READ)
+		for _, location := range locations {
+			// See if any node with data for this has has already been requested. If so, then this hash can be skipped.
+			if locationsAsked[location] {
+				continue hashLoop
+			}
+		}
+		// TODO Improve load balancing of nodes. Eg. prioritize based on certain attributes.
+		for _, location := range locations {
 			if !locationsAsked[location] {
 				results, qErr, res := request(stmt, location, client, r)
 				response = res
@@ -223,6 +233,8 @@ func performQuery(stmt string, r *http.Request, hashes []int, resolver *cluster.
 					break
 				}
 			} else {
+				// If one node that has data for this hash has already been requested,
+				// then there is no point in trying any location, which is the reason for breaking.
 				break
 			}
 		}
@@ -371,7 +383,7 @@ func NewResultSource(results []Result) *ResultSource {
 			}
 		}
 	}
-
+	// TODO handle empty result
 	for i, col := range results[0].Series[0].Columns {
 		source.fieldIndices[col] = i
 	}
@@ -393,6 +405,7 @@ func (s *ResultSource) Next(fieldKey string) []float64 {
 			switch value := data[fieldIndex].(type) {
 			case int: res[i] = float64(value)
 			case float64: res[i] = value
+			case nil: res[i] = 0
 			default:
 				panic(fmt.Errorf("Unsupported type %T", value))
 			}
