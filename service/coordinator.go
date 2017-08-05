@@ -110,7 +110,8 @@ func mergeQueryResults(groupedResults map[string][]Result, tree *merge.QueryTree
 			for _, f := range tree.Fields {
 				switch f.Root.(type) {
 				case *merge.Top, *merge.Bottom:
-					// TODO Add support for adding multiple values. All other values should be nil.
+					// TODO Add support for adding multiple values. Note that in 1.3 is is no longe possible to use
+					// both aggregations function and top/bottom which makes this easier. 
 				}
 				value = append(value, f.Root.Next(src)[0])
 			}

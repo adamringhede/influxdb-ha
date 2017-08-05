@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"time"
 	"errors"
-	"github.com/coreos/etcd/clientv3/concurrency"
 	"sync"
 )
 
@@ -105,7 +104,7 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		go (func() {
 			relayErr := h.relayToLocations(locations, encodedQuery, auth, broadcastData)
 			if relayErr != nil {
-				panic(relayErr)
+				panic(relayErr) // TODO do not panic! TODO test that formatting and other issues receive an immediate response.
 			}
 			wg.Done()
 		})()
@@ -119,7 +118,7 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Writing partitioned data to %s", strings.Join(locations, ", "))
 			relayErr := h.relayToLocations(locations, encodedQuery, auth, data)
 			if relayErr != nil {
-				panic(relayErr)
+				panic(relayErr) // TODO do not panic!
 			}
 			wg.Done()
 		})()
@@ -154,8 +153,6 @@ func convertPointToBytes(points []models.Point, precision string) []byte {
 }
 
 func (h *WriteHandler) relayToLocations(locations []string, query string, auth string, buf []byte) error {
-	// TODO handler errors
-	// TODO retry on failure
 	for _, location := range locations {
 		req, err := http.NewRequest("POST", "http://" + location + "/write?" + query, bytes.NewReader(buf))
 		if err != nil {
@@ -170,6 +167,25 @@ func (h *WriteHandler) relayToLocations(locations []string, query string, auth s
 		}
 		resp, responseErr := h.client.Do(req)
 		if responseErr != nil {
+			// Retry in case of temporary issue. For longer downtime, the recipient needs
+			// another way to recover the lost write.
+			// The data (buf) needs to be written to some reliable storage (appended to a file)
+			// and the recipient needs to know where this data is and import it.
+			// However, if the location the data is written to is not available when the node
+			// recovers, the data may be lost forever.
+
+			// One solution to start with could be to just store it locally if the retry failed
+			// Once the target node recovers, we need to figure out if it should still have the data
+			// to send *
+
+			// High availability setup with load balancing but without partitioning
+			// Set the replication factor to a value equal to or greater than the number of nodes
+			// Once a new node joins the cluster. It will steal tokens in order to become the primary
+			// of them. This is necessary as it
+
+			// An alternative to the high availability setup is to not rely on tokens at all.
+			// It would then write everything to every node. 
+			go retryWrite(req)
 			return responseErr
 		}
 		if resp.StatusCode != 204 {
@@ -177,9 +193,9 @@ func (h *WriteHandler) relayToLocations(locations []string, query string, auth s
 			if rErr != nil {
 				log.Fatal(rErr)
 			}
-			log.Println(string(body))
-			return errors.New("Received unexpected response from InfluxDB")
+			return fmt.Errorf("Received unexpected response from InfluxDB: %s", string(body))
 		}
+
 	}
 	return nil
 }
@@ -189,4 +205,23 @@ func createRelayOutput(location string) relay.HTTPOutputConfig {
 	output.Name = location
 	output.Location = "http://" + location + "/write"
 	return output
+}
+
+const maxWriteRetries = 10
+const retryTimeoutSeconds = 5
+
+func retryWrite(req *http.Request) {
+	client := http.Client{Timeout: time.Second * 5}
+	retries := 0
+	for true {
+		retries += 1
+		resp, _ := client.Do(req)
+		if resp != nil && resp.StatusCode != 204 {
+			break
+		}
+		if retries >= maxWriteRetries {
+			break
+		}
+		time.Sleep(time.Second * retryTimeoutSeconds)
+	}
 }
