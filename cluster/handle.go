@@ -188,7 +188,7 @@ func (e eventDelegate) NotifyJoin(member *memberlist.Node) {
 
 func (e eventDelegate) NotifyLeave(member *memberlist.Node) {
 	if node, ok := e.handle.Nodes[member.Name]; ok {
-		node.Status = STATUS_REMOVED
+		node.Status = NodeStatusRemoved
 		log.Printf("[Cluster] Member removed %s", member.Name)
 		// TODO Don't remove tokens until specifically told so. Listen for a broad-casted remove message.
 		delete(e.handle.Nodes, member.Name)

@@ -48,7 +48,7 @@ func TestImporter(t *testing.T) {
 	initiate()
 	resolver := cluster.NewResolver()
 	for _, token := range []int{0,100} {
-		resolver.AddToken(token,  &cluster.Node{[]int{}, cluster.STATUS_UP, influxOne, "influx-1"})
+		resolver.AddToken(token,  &cluster.Node{[]int{}, cluster.NodeStatusUp, influxOne, "influx-1"})
 	}
 
 	postLines(influxOne, testDB, "autogen", []string{

@@ -19,7 +19,7 @@ func TestResolver_FindByKey(t *testing.T) {
 	resolver := NewResolver()
 	assert.Len(t, resolver.FindByKey(2, READ), 0)
 
-	resolver.AddToken(1, &Node{[]int{1}, STATUS_UP, ":8086", "local"})
+	resolver.AddToken(1, &Node{[]int{1}, NodeStatusUp, ":8086", "local"})
 	resolver.AddToken(3, &Node{})
 
 	locations := resolver.FindByKey(2, READ)
@@ -34,8 +34,8 @@ func TestResolver_FindByKey(t *testing.T) {
 
 func TestResolver_ReverseSecondaryLookup(t *testing.T) {
 	resolver := NewResolver()
-	node1 := &Node{[]int{}, STATUS_UP, ":8081", "local"}
-	node2 := &Node{[]int{}, STATUS_UP, ":8082", "local2"}
+	node1 := &Node{[]int{}, NodeStatusUp, ":8081", "local"}
+	node2 := &Node{[]int{}, NodeStatusUp, ":8082", "local2"}
 
 	resolver.AddToken(1, node1)
 	resolver.AddToken(2, node2)

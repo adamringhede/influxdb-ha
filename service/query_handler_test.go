@@ -50,8 +50,8 @@ func init() {
 	// gold = 3966162835
 	resolver := cluster.NewResolver()
 	resolver.ReplicationFactor = 1
-	resolver.AddToken(0,  &cluster.Node{[]int{}, cluster.STATUS_UP, influxOne, "influx-1"})
-	resolver.AddToken(3000000000,  &cluster.Node{[]int{}, cluster.STATUS_UP, influxTwo, "influx-2"})
+	resolver.AddToken(0,  &cluster.Node{[]int{}, cluster.NodeStatusUp, influxOne, "influx-1"})
+	resolver.AddToken(3000000000,  &cluster.Node{[]int{}, cluster.NodeStatusUp, influxTwo, "influx-2"})
 
 	writePoints([]*influx.Point{
 		newPoint("trash", 0),

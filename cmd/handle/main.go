@@ -53,6 +53,7 @@ func main() {
 	handleErr(hostErr)
 	nodeStorage := cluster.NewEtcdNodeStorage(c)
 	tokenStorage := cluster.NewEtcdTokenStorageWithClient(c)
+	hintsStorage := cluster.NewEtcdHintStorage(c, nodeName)
 
 	localNode, nodeErr := nodeStorage.Get(nodeName)
 	handleErr(nodeErr)
@@ -62,6 +63,36 @@ func main() {
 		localNode.Name = nodeName
 	}
 	localNode.DataLocation = *data
+
+	/*
+	If there are nodes
+	 */
+	if !isNew {
+		selfHints, err := hintsStorage.GetByTarget(nodeName)
+		handleErr(err)
+		if len(selfHints) != 0 {
+			localNode.Status = cluster.NodeStatusRecovering
+			// TODO Manage node recovery status
+			// at least one other node is holding data that should be written to this one.
+			// wait for a certain amount of time for those nodes to start writing.
+			// the amount of time should be enough for common maintenance tasks.
+			// at this stage we should allow write requests, but not reads unless
+			// there is a configuration that allows this while recovering.
+			// when all the hints are deleted, the recovery is assumed done and we
+			// can update the node's status allow for reads.
+			// it no node is able to write data we can not completely recover.
+			// an admin will have to execute a cluster command to override this
+			// or delete the data.
+		}
+		// TODO launch component to start pinging other data locations for their availability
+		// for which this node is holding data.
+		/*
+		1. for each node, ping
+		2. wait
+		3. once a node comes alive
+		 */
+	}
+
 	saveErr := nodeStorage.Save(localNode)
 	handleErr(saveErr)
 
@@ -169,7 +200,7 @@ func main() {
 		}
 		mtx.Unlock(context.Background())
 	} else {
-		// TODO check if importing data, if so, then resume.
+		// TODO check if importing data from initial sync or from a node being deleted, if so, then resume.
 	}
 
 	// Sleep forever

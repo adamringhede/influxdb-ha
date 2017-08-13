@@ -11,10 +11,11 @@ import (
 )
 
 const (
-	STATUS_REMOVED = iota
-	STATUS_UP
-	STATUS_JOINING
-	STATUS_IDLE
+	NodeStatusRemoved    = iota
+	NodeStatusUp
+	NodeStatusJoining
+	NodeStatusIdle
+	NodeStatusRecovering
 )
 
 type Node struct {
@@ -61,7 +62,7 @@ type LocalNode struct {
 
 func NewLocalNode() *LocalNode {
 	node := &LocalNode{}
-	node.Status = STATUS_IDLE
+	node.Status = NodeStatusIdle
 	node.Meta = ClusterMeta{}
 	return node
 }
@@ -95,7 +96,7 @@ func (node *LocalNode) Init() error {
 	}
 	node.Tokens = data.Tokens
 	node.Meta.PartitionKeys = data.PartitionKeys
-	node.Status = STATUS_UP
+	node.Status = NodeStatusUp
 	return nil
 }
 
