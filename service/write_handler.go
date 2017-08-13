@@ -1,30 +1,32 @@
 package service
 
 import (
+	"bytes"
+	"errors"
+	"fmt"
 	"github.com/adamringhede/influxdb-ha/cluster"
+	"github.com/adamringhede/influxdb-ha/cluster/recovery"
 	"github.com/influxdata/influxdb-relay/relay"
+	"github.com/influxdata/influxdb/models"
+	"io/ioutil"
 	"log"
 	"net/http"
-	"io/ioutil"
-	"github.com/influxdata/influxdb/models"
-	"fmt"
-	"strings"
-	"bytes"
 	"strconv"
-	"time"
-	"errors"
+	"strings"
 	"sync"
+	"time"
 )
 
 type WriteHandler struct {
-	client      *http.Client
-	resolver    *cluster.Resolver
-	partitioner *cluster.Partitioner
+	client          *http.Client
+	resolver        *cluster.Resolver
+	partitioner     *cluster.Partitioner
+	recoveryStorage recovery.Storage
 }
 
-func NewWriteHandler(resolver *cluster.Resolver, partitioner *cluster.Partitioner) *WriteHandler {
+func NewWriteHandler(resolver *cluster.Resolver, partitioner *cluster.Partitioner, rs, storage recovery.Storage) *WriteHandler {
 	client := &http.Client{Timeout: 10 * time.Second}
-	return &WriteHandler{client, resolver, partitioner}
+	return &WriteHandler{client, resolver, partitioner, rs}
 }
 
 func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -66,7 +68,7 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if !h.partitioner.FulfillsKey(key, values) {
 				jsonError(w, http.StatusBadRequest,
 					fmt.Sprintf("the partition key for measurement %s requires the tags [%s]",
-					key.Measurement, strings.Join(key.Tags, ", ")))
+						key.Measurement, strings.Join(key.Tags, ", ")))
 				return
 			}
 			// TODO add support for multiple
@@ -112,9 +114,9 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	wg.Add(len(pointGroups))
 	for numericHash, points := range pointGroups {
-		go (func(){
+		go (func() {
 			data := convertPointToBytes(points, precision)
-			locations := h.resolver.FindByKey(numericHash, cluster.WRITE)
+			locations := h.resolver.FindNodesByKey(numericHash, cluster.WRITE)
 			log.Printf("Writing partitioned data to %s", strings.Join(locations, ", "))
 			relayErr := h.relayToLocations(locations, encodedQuery, auth, data)
 			if relayErr != nil {
@@ -152,9 +154,10 @@ func convertPointToBytes(points []models.Point, precision string) []byte {
 	return []byte(pointsString)
 }
 
-func (h *WriteHandler) relayToLocations(locations []string, query string, auth string, buf []byte) error {
-	for _, location := range locations {
-		req, err := http.NewRequest("POST", "http://" + location + "/write?" + query, bytes.NewReader(buf))
+func (h *WriteHandler) relayToLocations(nodes []*cluster.Node, query string, auth string, buf []byte) error {
+	for _, node := range nodes {
+		location := node.DataLocation
+		req, err := http.NewRequest("POST", "http://"+location+"/write?"+query, bytes.NewReader(buf))
 		if err != nil {
 			return err
 		}
@@ -184,8 +187,14 @@ func (h *WriteHandler) relayToLocations(locations []string, query string, auth s
 			// of them. This is necessary as it
 
 			// An alternative to the high availability setup is to not rely on tokens at all.
-			// It would then write everything to every node. 
-			go retryWrite(req)
+			// It would then write everything to every node.
+			go (func() {
+				// Retry the write before putting it in recovery storage
+				success := h.retryWrite(req)
+				if !success {
+					h.recoveryStorage.Put(node.Name, buf)
+				}
+			})()
 			return responseErr
 		}
 		if resp.StatusCode != 204 {
@@ -193,7 +202,7 @@ func (h *WriteHandler) relayToLocations(locations []string, query string, auth s
 			if rErr != nil {
 				log.Fatal(rErr)
 			}
-			return fmt.Errorf("Received unexpected response from InfluxDB: %s", string(body))
+			return fmt.Errorf("Received error from InfluxDB: %s", string(body))
 		}
 
 	}
@@ -210,18 +219,19 @@ func createRelayOutput(location string) relay.HTTPOutputConfig {
 const maxWriteRetries = 10
 const retryTimeoutSeconds = 5
 
-func retryWrite(req *http.Request) {
+func (h *WriteHandler) retryWrite(req *http.Request) bool {
 	client := http.Client{Timeout: time.Second * 5}
 	retries := 0
 	for true {
 		retries += 1
 		resp, _ := client.Do(req)
 		if resp != nil && resp.StatusCode != 204 {
-			break
+			return true
 		}
 		if retries >= maxWriteRetries {
 			break
 		}
 		time.Sleep(time.Second * retryTimeoutSeconds)
 	}
+	return false
 }

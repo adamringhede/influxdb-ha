@@ -22,18 +22,26 @@ func NewResolver() *Resolver {
 	return &Resolver{NewPartitionCollection(), make(map[*Node]int), 2}
 }
 
+func (r *Resolver) FindNodesByKey(key int, purpose int) []*Node {
+	partitions := r.collection.GetMultiple(key, r.ReplicationFactor)
+	nodesMap := make(map[*Node]bool)
+	for _, p := range partitions {
+		nodesMap[p.Node] = true
+	}
+	nodes := []*Node{}
+	for node := range nodesMap {
+		nodes = append(nodes, node)
+	}
+	return nodes
+}
+
 // FindByKey can return multiple locations for replication and load balancing.
 // On reads, it will not return nodes with status "syncing"
 // However, on writes it will return "syncing" nodes so that they can catch up.
 func (r *Resolver) FindByKey(key int, purpose int) []string {
-	partitions := r.collection.GetMultiple(key, r.ReplicationFactor)
-	locationMap := make(map[string]bool)
-	for _, p := range partitions {
-		locationMap[p.Node.DataLocation] = true
-	}
 	locations := []string{}
-	for location, _ := range locationMap {
-		locations = append(locations, location)
+	for _, node := range r.FindNodesByKey(key, purpose) {
+		locations = append(locations, node.DataLocation)
 	}
 	return locations
 }
@@ -71,7 +79,14 @@ func (r *Resolver) ReverseSecondaryLookup(key int) []int {
 	return tokens
 }
 
-// TODO find all should also include nodes with only reserved tokens.
+func (r *Resolver) FindAllNodes() []*Node {
+	nodes := make([]*Node, len(r.nodes))
+	for node, _ := range r.nodes {
+		nodes = append(nodes, node)
+	}
+	return nodes
+}
+
 func (r *Resolver) FindAll() []string {
 	locations := []string{}
 	for node, _ := range r.nodes {

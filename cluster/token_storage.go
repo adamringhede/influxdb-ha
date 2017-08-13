@@ -21,27 +21,16 @@ type tokenStorage interface {
 	Release()
 }
 
-const etcdStorageBaseDir = "influxdbCluster"
-const etcdStorageReservedTokens = "reservedTokens"
 const etcdStorageTokens = "tokens"
 
-type etcdStorageBase struct {
-	clusterID string
-	client    *clientv3.Client
-}
-
-func (s *etcdStorageBase) path(path string) string {
-	return etcdStorageBaseDir + "/" + s.clusterID + "/" + path + "/"
-}
-
 type EtcdTokenStorage struct {
-	etcdStorageBase
+	EtcdStorageBase
 	session      *concurrency.Session
 	reservations map[int]clientv3.LeaseID
 }
 
 func (s *EtcdTokenStorage) Watch() clientv3.WatchChan {
-	return s.client.Watch(context.Background(), s.path(etcdStorageTokens), clientv3.WithPrefix())
+	return s.Client.Watch(context.Background(), s.path(etcdStorageTokens), clientv3.WithPrefix())
 }
 
 func (s *EtcdTokenStorage) Lock() (*concurrency.Mutex, error) {
@@ -80,14 +69,13 @@ func (s *EtcdTokenStorage) SuggestReservations() ([]int, error) {
 
 // Assign sets a token to refer to a certain node
 func (s *EtcdTokenStorage) Assign(token int, node string) error {
-	resp, err := s.client.Put(context.Background(), s.tokenPath(token, etcdStorageTokens), node)
-	log.Println(resp)
+	_, err := s.Client.Put(context.Background(), s.tokenPath(token, etcdStorageTokens), node)
 	return err
 }
 
 // Get return a map of all tokens and the nodes they refer to.
 func (s *EtcdTokenStorage) Get() (map[int]string, error) {
-	resp, getErr := s.client.Get(context.Background(), s.path(etcdStorageTokens), clientv3.WithPrefix())
+	resp, getErr := s.Client.Get(context.Background(), s.path(etcdStorageTokens), clientv3.WithPrefix())
 	if getErr != nil {
 		return nil, getErr
 	}
@@ -105,7 +93,7 @@ func (s *EtcdTokenStorage) Get() (map[int]string, error) {
 // Reserve should prevent other nodes from assigning a token to itself as some other is
 // currently importing data for it to later assign the token to itself.
 func (s *EtcdTokenStorage) Reserve(token int, node string) (bool, error) {
-	resp, getErr := s.client.Get(context.Background(), s.tokenPath(token, etcdStorageReservedTokens))
+	resp, getErr := s.Client.Get(context.Background(), s.tokenPath(token, etcdStorageReservedTokens))
 	// Do not reserve if it is reserved by some other node
 	if getErr != nil {
 		switch e := getErr.(type) {
@@ -120,7 +108,7 @@ func (s *EtcdTokenStorage) Reserve(token int, node string) (bool, error) {
 	if resp != nil && resp.Count > 0 {
 		return string(resp.Kvs[0].Value) == node, nil
 	}
-	lease := clientv3.NewLease(s.client)
+	lease := clientv3.NewLease(s.Client)
 	// The node has 30 minutes to import data from the other node, after that point another node can
 	// take over the token. The reason for the lease is to avoid interrupting large transfers.
 	grantResp, grantErr := lease.Grant(context.Background(), 3600/2)
@@ -128,7 +116,7 @@ func (s *EtcdTokenStorage) Reserve(token int, node string) (bool, error) {
 		return false, grantErr
 	}
 	s.reservations[token] = grantResp.ID
-	_, err := s.client.Put(context.Background(), s.tokenPath(token, etcdStorageReservedTokens), node,
+	_, err := s.Client.Put(context.Background(), s.tokenPath(token, etcdStorageReservedTokens), node,
 		clientv3.WithLease(grantResp.ID))
 	return err == nil, err
 }
@@ -136,15 +124,15 @@ func (s *EtcdTokenStorage) Reserve(token int, node string) (bool, error) {
 // Release is called after a node has finished importing data for a token range
 func (s *EtcdTokenStorage) Release(token int) error {
 	if _, ok := s.reservations[token]; ok {
-		s.client.Revoke(context.Background(), s.reservations[token])
+		s.Client.Revoke(context.Background(), s.reservations[token])
 	}
-	_, err := s.client.Delete(context.Background(), s.tokenPath(token, etcdStorageReservedTokens))
+	_, err := s.Client.Delete(context.Background(), s.tokenPath(token, etcdStorageReservedTokens))
 	delete(s.reservations, token)
 	return err
 }
 
 func (s *EtcdTokenStorage) Init(node string, numRanges int) error {
-	_, err := concurrency.NewSTM(s.client, func(stm concurrency.STM) error {
+	_, err := concurrency.NewSTM(s.Client, func(stm concurrency.STM) error {
 		initKey := s.path("initiated")
 		initiated := stm.Get(initKey)
 		if initiated == "true" {
@@ -171,12 +159,12 @@ func (s *EtcdTokenStorage) InitMany(node string, numRanges int) (bool, error) {
 	//	return false, lockErr
 	//}
 	//defer mtx.Unlock(context.Background())
-	_, err := concurrency.NewSTM(s.client, func(stm concurrency.STM) error {
+	_, err := concurrency.NewSTM(s.Client, func(stm concurrency.STM) error {
 		initiated := stm.Get(initKey)
 		if initiated == "true" {
 			return errAlreadyInitiated{}
 		}
-		lease := clientv3.NewLease(s.client)
+		lease := clientv3.NewLease(s.Client)
 		grantResp, err := lease.Grant(context.Background(), 30)
 		if err != nil {
 			return err
@@ -204,7 +192,7 @@ func (s *EtcdTokenStorage) InitMany(node string, numRanges int) (bool, error) {
 		err := s.Assign(i*rangeSize, node)
 		if err != nil {
 			// Attempt to clean up
-			s.client.Delete(context.Background(), initKey)
+			s.Client.Delete(context.Background(), initKey)
 			return false, err
 		}
 	}
@@ -220,8 +208,8 @@ func NewEtcdTokenStorage() *EtcdTokenStorage {
 
 func NewEtcdTokenStorageWithClient(c *clientv3.Client) *EtcdTokenStorage {
 	s := NewEtcdTokenStorage()
-	s.client = c
-	session, err := concurrency.NewSession(s.client)
+	s.Client = c
+	session, err := concurrency.NewSession(s.Client)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -234,11 +222,11 @@ func (s *EtcdTokenStorage) Open(entrypoints []string) {
 		Endpoints:   entrypoints,
 		DialTimeout: 5 * time.Second,
 	})
-	s.client = c
+	s.Client = c
 	if err != nil {
 		log.Fatal(err)
 	}
-	session, err := concurrency.NewSession(s.client)
+	session, err := concurrency.NewSession(s.Client)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -246,7 +234,7 @@ func (s *EtcdTokenStorage) Open(entrypoints []string) {
 }
 
 func (s *EtcdTokenStorage) Close() {
-	s.client.Close()
+	s.Client.Close()
 }
 
 func (s *EtcdTokenStorage) tokenPath(token int, path string) string {

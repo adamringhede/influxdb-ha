@@ -16,17 +16,17 @@ type NodeStorage interface {
 }
 
 type EtcdNodeStorage struct {
-	etcdStorageBase
+	EtcdStorageBase
 }
 
 func NewEtcdNodeStorage(c *clientv3.Client) *EtcdNodeStorage {
 	s := &EtcdNodeStorage{}
-	s.client = c
+	s.Client = c
 	return s
 }
 
 func (s *EtcdNodeStorage) Watch() clientv3.WatchChan {
-	return s.client.Watch(context.Background(), s.path("nodes"), clientv3.WithPrefix())
+	return s.Client.Watch(context.Background(), s.path("nodes"), clientv3.WithPrefix())
 }
 
 func (s *EtcdNodeStorage) Save(node *Node) error {
@@ -34,12 +34,12 @@ func (s *EtcdNodeStorage) Save(node *Node) error {
 	if err != nil {
 		return err
 	}
-	s.client.Put(context.Background(), s.path("nodes/" + node.Name), string(data))
+	s.Client.Put(context.Background(), s.path("nodes/" + node.Name), string(data))
 	return nil
 }
 
 func (s *EtcdNodeStorage) Get(name string) (*Node, error) {
-	resp, getErr := s.client.Get(context.Background(), s.path("nodes/" + name))
+	resp, getErr := s.Client.Get(context.Background(), s.path("nodes/" + name))
 	if getErr != nil || resp.Count == 0 {
 		return nil, getErr
 	}
@@ -52,7 +52,7 @@ func (s *EtcdNodeStorage) Get(name string) (*Node, error) {
 }
 
 func (s *EtcdNodeStorage) GetAll() ([]*Node, error) {
-	resp, getErr := s.client.Get(context.Background(), s.path("nodes"), clientv3.WithPrefix())
+	resp, getErr := s.Client.Get(context.Background(), s.path("nodes"), clientv3.WithPrefix())
 	if getErr != nil {
 		return nil, getErr
 	}
@@ -69,7 +69,7 @@ func (s *EtcdNodeStorage) GetAll() ([]*Node, error) {
 }
 
 func (s *EtcdNodeStorage) Remove(name string) (bool, error) {
-	resp, err := s.client.Delete(context.Background(), s.path("nodes/" + name))
+	resp, err := s.Client.Delete(context.Background(), s.path("nodes/" + name))
 	if err != nil {
 		return false, err
 	}
@@ -77,7 +77,7 @@ func (s *EtcdNodeStorage) Remove(name string) (bool, error) {
 }
 
 func (s *EtcdNodeStorage) RemoveAll(name string) (int, error) {
-	resp, err := s.client.Delete(context.Background(), s.path("nodes/"), clientv3.WithPrefix())
+	resp, err := s.Client.Delete(context.Background(), s.path("nodes/"), clientv3.WithPrefix())
 	if err != nil {
 		return 0, err
 	}
