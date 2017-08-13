@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 	"time"
 	"net/http"
+	"net/url"
+	"bytes"
+	"strconv"
+	"strings"
 )
 
 type RecoveryChunk struct {
@@ -16,9 +20,11 @@ type RecoveryChunk struct {
 
 type RecoveryStorage interface {
 	// Put should save data so that it later can be sent to the data node when it recovers
-	Put(nodeName string, buf []byte) error
+	Put(nodeName, db, rp string, buf []byte) error
 	// Get will return a channel of for streaming data for a certain node
-	Get(nodeName string) chan RecoveryChunk
+	Get(nodeName string) (chan RecoveryChunk, error)
+	// Remove data for a node
+	Drop(nodeName string) error
 }
 
 type LocalRecoveryStorage struct {
@@ -28,9 +34,9 @@ type LocalRecoveryStorage struct {
 	files map[string]*os.File
 }
 
-// NewLocalStorage create a LocalRecoveryStorage for saving data at the specified path in different files.
+// NewLocalRecoveryStorage create a LocalRecoveryStorage for saving data at the specified path in different files.
 // A hint storage can be provided in order to save where data is placed for recovery.
-func NewLocalStorage(path string, hs HintStorage) *LocalRecoveryStorage {
+func NewLocalRecoveryStorage(path string, hs HintStorage) *LocalRecoveryStorage {
 	return &LocalRecoveryStorage{path, hs, map[string]*os.File{}}
 }
 
@@ -86,9 +92,7 @@ func (s *LocalRecoveryStorage) Drop(nodeName string) (err error) {
 	return err
 }
 
-func (s *LocalRecoveryStorage) Get(nodeName string) (<-chan RecoveryChunk, error) {
-	// open all files matching the node name
-	//f, err := os.Open(s.getFilePath(nodeName))
+func (s *LocalRecoveryStorage) Get(nodeName string) (chan RecoveryChunk, error) {
 	matches, err := filepath.Glob(s.getFilePath(nodeName, "*", "*"))
 	if err != nil {
 		return nil, err
@@ -146,16 +150,69 @@ func createFilename(nodeName, db, rp string) string {
 }
 
 func RecoverNodes(hs *EtcdHintStorage, data RecoveryStorage, nodes map[string]*Node) {
+	client := &http.Client{Timeout:time.Second * 2}
 	for {
 		for target := range hs.Local {
-			if _, ok := nodes[target]; ok {
-				//targetNode.DataLocation
+			if targetNode, ok := nodes[target]; ok {
+				if isAlive(targetNode.DataLocation, client) {
+					err := recoverNode(targetNode, data)
+					if err == nil {
+						fmt.Printf("Finished recovering node %s\n", target)
+						data.Drop(target)
+					} else {
+						fmt.Println(err.Error())
+					}
+				}
 			}
 		}
-		time.Sleep(time.Millisecond * 500)
+		time.Sleep(time.Second)
 	}
 }
 
-func isAlive(location string, client *http.Client) {
-	client.Get("http://" + location + "/query")
+func recoverNode(node *Node, data RecoveryStorage) error {
+	ch, err := data.Get(node.Name)
+	if err != nil {
+		return fmt.Errorf("Failed to recover data for node %s when reading data: %s", node.Name, err.Error())
+	}
+	for chunk := range ch {
+		resp, err := postData(node.DataLocation, chunk.RP, chunk.DB, chunk.Buf)
+		if err != nil {
+			return fmt.Errorf("Failed to recover data for node %s. Got error: %s", node.Name, err.Error())
+		}
+		if resp.StatusCode > 204 {
+			return fmt.Errorf("Failed to recover data for node %s. Received response code: %d", node.Name, resp.StatusCode)
+		}
+ 	}
+	return nil
+}
+
+func isAlive(location string, client *http.Client) bool {
+	values, _ := url.ParseQuery("q=SHOW DATABASES")
+	resp, err := client.Get("http://" + location + "/query?q=" + values.Encode())
+	return err == nil && resp.StatusCode >= 200 && resp.StatusCode <= 299
+}
+
+func postData(location, db, rp string, buf []byte) (*http.Response, error) {
+	req, err := http.NewRequest("POST", "http://"+location+"/write", bytes.NewReader(buf))
+	if err != nil {
+		return nil, err
+	}
+	query := []string{
+		"db=" + db,
+		"rp=" + rp,
+	}
+
+	req.URL.RawQuery = strings.Join(query, "&")
+	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("Content-Length", strconv.Itoa(len(buf)))
+	//if auth != "" {
+	//	req.Header.Set("Authorization", auth)
+	//}
+	client := http.Client{Timeout: 60 * time.Second}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	return resp, err
 }

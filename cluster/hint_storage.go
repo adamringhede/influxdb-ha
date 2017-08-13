@@ -20,7 +20,7 @@ type HintStorage interface {
 	Put(target string, status int) error
 	// GetByTarget returns the nodes that currently holds data for the node and the status of recovery
 	GetByTarget(target string) (map[string]int, error)
-	GetByHolder(holder string) ([]string, error)
+	GetByHolder() ([]string, error)
 }
 
 type EtcdHintStorage struct {

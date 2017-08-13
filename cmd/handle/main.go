@@ -54,6 +54,7 @@ func main() {
 	nodeStorage := cluster.NewEtcdNodeStorage(c)
 	tokenStorage := cluster.NewEtcdTokenStorageWithClient(c)
 	hintsStorage := cluster.NewEtcdHintStorage(c, nodeName)
+	recoveryStorage := cluster.NewLocalRecoveryStorage("/data/influxdb_recovery/", hintsStorage)
 
 	localNode, nodeErr := nodeStorage.Get(nodeName)
 	handleErr(nodeErr)
@@ -170,6 +171,8 @@ func main() {
 			}
 		}
 	})()
+
+	cluster.RecoverNodes(hintsStorage, recoveryStorage, nodesMap)
 
 	httpConfig := service.Config{
 		BindAddr: *bindClientAddr,
