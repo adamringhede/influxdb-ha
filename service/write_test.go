@@ -36,19 +36,4 @@ TODO Test hinted hand off
 TODO Test retries
 TODO Test different configurations
 
-
-- Hinted hand-off
-It can be implemented by storing the data in a local data structure in memory by appending failed writes to it.
-No need for gossip here. Instead, it can try to connect to the data node with a health check with an exponential
-back off up to 10 minutes.
-
-Actually needs to write it to some storage that the node can read from after it recovers.
-It could be an
-
-
-
-
-After a write fails, add it to a retry component that takes care of retries and hinted handoff.
-
-
  */

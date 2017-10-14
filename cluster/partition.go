@@ -9,8 +9,11 @@ type Partition struct {
 	Node  *Node
 }
 
-// PartitionCollection is for partition look ups
-// backed by an AVL-tree
+// PartitionCollection is for partition look ups.
+// Partitions are on a ring and get methods returns a partition
+// given a token on that ring. When finding multiple partitions
+// for a single token, multiple partitions are never returned for
+// belonging to the same node as that would undermine the replication factor.
 type PartitionCollection struct {
 	tree *avltree.Tree
 }
@@ -39,6 +42,7 @@ func (c *PartitionCollection) Get(key int) *Partition {
 	return node.Value.(*Partition)
 }
 
+// GetMultiple returns a specified count of partitions with unique nodes.
 func (c *PartitionCollection) GetMultiple(key int, count int) []*Partition {
 	res := []*Partition{}
 	node, ok := c.findNode(key)

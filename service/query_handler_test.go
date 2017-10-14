@@ -64,7 +64,7 @@ func init() {
 
 	partitioner := newPartitioner()
 
-	go Start(resolver, partitioner, Config{
+	go Start(resolver, partitioner, cluster.NewLocalRecoveryStorage("./", nil), Config{
 		"0.0.0.0",
 		8099,
 	})

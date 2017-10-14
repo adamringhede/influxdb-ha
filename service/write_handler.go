@@ -2,7 +2,6 @@ package service
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"github.com/adamringhede/influxdb-ha/cluster"
 	"github.com/influxdata/influxdb-relay/relay"
