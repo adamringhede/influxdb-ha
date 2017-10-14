@@ -30,6 +30,7 @@ type nodeMeta struct {
 	DataLocation string
 }
 
+
 func (node *Node) updateFromBytes(data []byte) error {
 	buf := bytes.NewBuffer(data)
 	var m nodeMeta
@@ -48,6 +49,10 @@ func (node *Node) updateFromBytes(data []byte) error {
 	log.Printf("[Cluster] Info: Received node status %d from %s", m.Status, node.Name)
 	log.Printf("I should send requests to %s", node.DataLocation)
 	return nil
+}
+
+func (node *Node) String() string {
+	return node.Name
 }
 
 type ClusterMeta struct {

@@ -77,9 +77,9 @@ func (s *LocalRecoveryStorage) Put(nodeName, db, rp string, buf []byte) error {
 	}
 	if s.hints != nil {
 		err = s.hints.Put(nodeName, StatusWaiting)
-	}
-	if err != nil {
-		return fmt.Errorf("Failed to put recovery hint: %s", err.Error())
+		if err != nil {
+			return fmt.Errorf("Failed to put recovery hint: %s", err.Error())
+		}
 	}
 	return nil
 }
@@ -132,9 +132,7 @@ func (s *LocalRecoveryStorage) Get(nodeName string) (chan RecoveryChunk, error) 
 			}
 			f.Close()
 		}
-
 		close(ch)
-
 	}()
 	return ch, nil
 }
@@ -146,7 +144,7 @@ func (s *LocalRecoveryStorage) Close() {
 }
 
 func createFilename(nodeName, db, rp string) string {
-	return fmt.Sprintf("recovery_data_%s_%s_%s", nodeName, db, rp)
+	return fmt.Sprintf("recovery_data.%s.%s.%s", nodeName, db, rp)
 }
 
 func RecoverNodes(hs *EtcdHintStorage, data RecoveryStorage, nodes map[string]*Node) {

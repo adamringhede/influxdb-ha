@@ -85,14 +85,15 @@ func main() {
 			// an admin will have to execute a cluster command to override this
 			// or delete the data.
 		}
-		// TODO launch component to start pinging other data locations for their availability
-		// for which this node is holding data.
-		/*
-		1. for each node, ping
-		2. wait
-		3. once a node comes alive
-		 */
 	}
+
+	// TODO launch component to start pinging other data locations for their availability
+	// for which this node is holding data.
+	/*
+	1. for each node, ping
+	2. wait
+	3. once a node comes alive
+	 */
 
 	saveErr := nodeStorage.Save(localNode)
 	handleErr(saveErr)
@@ -172,7 +173,8 @@ func main() {
 		}
 	})()
 
-	cluster.RecoverNodes(hintsStorage, recoveryStorage, nodesMap)
+	// TODO need to subscribe to failed queries to be streamed to the recovery storage.
+	go cluster.RecoverNodes(hintsStorage, recoveryStorage, nodesMap)
 
 	httpConfig := service.Config{
 		BindAddr: *bindClientAddr,
@@ -187,7 +189,7 @@ func main() {
 		Tags:        []string{"type"},
 	})
 	// Starting the service here so that the node can receive writes while joining.
-	go service.Start(resolver, partitioner, httpConfig)
+	go service.Start(resolver, partitioner, recoveryStorage, httpConfig)
 
 	if isNew {
 		mtx, err := tokenStorage.Lock()

@@ -8,7 +8,7 @@ import (
 func TestPartitionCollection_Remove(t *testing.T) {
 	collection := NewPartitionCollection()
 	collection.Remove(4)
-	collection.Put(newPartition(4))
+	collection.Put(newPartition(4, "a"))
 	collection.Remove(4)
 }
 
@@ -16,7 +16,7 @@ func TestPartitionCollection_Get(t *testing.T) {
 	collection := NewPartitionCollection()
 	assert.Nil(t, collection.Get(3))
 
-	collection.Put(newPartition(2))
+	collection.Put(newPartition(2, "a"))
 
 	assert.Equal(t, 2, collection.Get(3).Token)
 	assert.Equal(t, 2, collection.Get(1).Token)
@@ -26,9 +26,9 @@ func TestPartitionCollection_GetMultiple(t *testing.T) {
 	collection := NewPartitionCollection()
 	assert.Empty(t, collection.GetMultiple(0, 2))
 
-	collection.Put(newPartition(2))
-	collection.Put(newPartition(5))
-	collection.Put(newPartition(9))
+	collection.Put(newPartition(2, "a"))
+	collection.Put(newPartition(5, "b"))
+	collection.Put(newPartition(9, "c"))
 
 	res := collection.GetMultiple(3, 3)
 	assert.Equal(t, 2, res[0].Token)
@@ -48,11 +48,11 @@ func TestPartitionCollection_GetMultiple(t *testing.T) {
 
 func TestPartitionCollection_Put(t *testing.T) {
 	collection := NewPartitionCollection()
-	collection.Put(newPartition(5))
-	collection.Put(newPartition(5))
+	collection.Put(newPartition(5, "a"))
+	collection.Put(newPartition(5, "b"))
 	assert.Equal(t, 1, collection.Size())
 }
 
-func newPartition(token int) *Partition {
-	return &Partition{token, &Node{}}
+func newPartition(token int, nodeName string) *Partition {
+	return &Partition{token, &Node{Name: nodeName}}
 }

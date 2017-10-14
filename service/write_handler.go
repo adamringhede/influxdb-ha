@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/adamringhede/influxdb-ha/cluster"
-	"github.com/adamringhede/influxdb-ha/cluster/recovery"
 	"github.com/influxdata/influxdb-relay/relay"
 	"github.com/influxdata/influxdb/models"
 	"io/ioutil"
@@ -21,21 +20,16 @@ type WriteHandler struct {
 	client          *http.Client
 	resolver        *cluster.Resolver
 	partitioner     *cluster.Partitioner
-	recoveryStorage recovery.Storage
+	recoveryStorage cluster.RecoveryStorage
 }
 
-func NewWriteHandler(resolver *cluster.Resolver, partitioner *cluster.Partitioner, rs, storage recovery.Storage) *WriteHandler {
+func NewWriteHandler(resolver *cluster.Resolver, partitioner *cluster.Partitioner, rs cluster.RecoveryStorage) *WriteHandler {
 	client := &http.Client{Timeout: 10 * time.Second}
 	return &WriteHandler{client, resolver, partitioner, rs}
 }
 
 func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Received request %s?%s\n", r.URL.Path, r.URL.RawQuery)
-
-	// TODO Need to refactor the creation of relays
-	// TODO Find shard key for the specified database and measurement
-	// TODO Hash tags as necessary and add as additional tags. If a tag is not included which is needed for the shard key return an error
-	// TODO Select the correct replicaset based on sharding or use the default one (first)
 
 	buf, err := ioutil.ReadAll(r.Body)
 	points, err := models.ParsePoints(buf)
@@ -98,15 +92,16 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	wg := sync.WaitGroup{}
 
+	var writeErr error
 	if len(broadcastGroup) > 0 {
 		wg.Add(1)
-		locations := h.resolver.FindAll()
-		log.Printf("Broacasting write partitioned data to %s", strings.Join(locations, ", "))
+		locations := h.resolver.FindAllNodes()
 		broadcastData := convertPointToBytes(broadcastGroup, precision)
 		go (func() {
 			relayErr := h.relayToLocations(locations, encodedQuery, auth, broadcastData)
 			if relayErr != nil {
-				panic(relayErr) // TODO do not panic! TODO test that formatting and other issues receive an immediate response.
+				writeErr = writeErr
+				fmt.Printf("Failed to write: %s", relayErr.Error())
 			}
 			wg.Done()
 		})()
@@ -114,16 +109,20 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	wg.Add(len(pointGroups))
 	for numericHash, points := range pointGroups {
-		go (func() {
+		go (func() { // TODO make the relaying into a channel so that we don't consume too much memory here
 			data := convertPointToBytes(points, precision)
 			locations := h.resolver.FindNodesByKey(numericHash, cluster.WRITE)
-			log.Printf("Writing partitioned data to %s", strings.Join(locations, ", "))
 			relayErr := h.relayToLocations(locations, encodedQuery, auth, data)
 			if relayErr != nil {
-				panic(relayErr) // TODO do not panic!
+				writeErr = relayErr
+				fmt.Printf("Failed to write: %s", relayErr.Error())
 			}
 			wg.Done()
 		})()
+	}
+	if writeErr != nil {
+		jsonError(w, http.StatusInternalServerError, fmt.Sprintf("One ore more writes failed: %s", writeErr.Error()))
+		return
 	}
 
 	wg.Wait()
@@ -192,7 +191,9 @@ func (h *WriteHandler) relayToLocations(nodes []*cluster.Node, query string, aut
 				// Retry the write before putting it in recovery storage
 				success := h.retryWrite(req)
 				if !success {
-					h.recoveryStorage.Put(node.Name, buf)
+					// TODO figure out if it is necessary to use database and rp
+					// or if this data is already saved in each point or if we can add defaults to the points.
+					h.recoveryStorage.Put(node.Name, "", "", buf)
 				}
 			})()
 			return responseErr
