@@ -9,6 +9,7 @@ import (
 func newEtcdStorage() *EtcdTokenStorage {
 	storage := NewEtcdTokenStorage()
 	storage.Open([]string{"http://127.0.0.1:2379"})
+	storage.Clear()
 	return storage
 }
 
@@ -21,6 +22,15 @@ func TestEtcdTokenStorage_Watch(t *testing.T) {
 	event := result.Events[0]
 	assert.Equal(t, mvccpb.PUT, event.Type)
 	assert.Equal(t, "foo", string(event.Kv.Value))
+}
+
+func TestEtcdTokenStorage_SuggestReservations(t *testing.T) {
+	storage := newEtcdStorage()
+	_, err := storage.InitMany("bar", 16)
+	assert.NoError(t, err)
+	suggestions, err := storage.SuggestReservations()
+	assert.NoError(t, err)
+	print(suggestions)
 }
 
 func TestEtcdTokenStorage_Init(t *testing.T) {

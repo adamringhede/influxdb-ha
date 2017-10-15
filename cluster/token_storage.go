@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"fmt"
+	"sort"
 )
 
 const maxToken = 2147483647
@@ -55,6 +57,11 @@ func (s *EtcdTokenStorage) SuggestReservations() ([]int, error) {
 		}
 		nodeTokens[name] = append(nodeTokens[name], token)
 	}
+	for _, tokens := range nodeTokens {
+		// The only reason for sorting, is to avoid randomness so that tests can make assumptions
+		// on token assignment.
+		sort.Ints(tokens)
+	}
 	// Steal tokens from other nodes
 	avgTokens := len(currentTokens) / (len(nodeTokens) + 1)
 	suggestions := []int{}
@@ -75,7 +82,8 @@ func (s *EtcdTokenStorage) Assign(token int, node string) error {
 
 // Get return a map of all tokens and the nodes they refer to.
 func (s *EtcdTokenStorage) Get() (map[int]string, error) {
-	resp, getErr := s.Client.Get(context.Background(), s.path(etcdStorageTokens), clientv3.WithPrefix())
+	resp, getErr := s.Client.Get(context.Background(), s.path(etcdStorageTokens),
+		clientv3.WithPrefix(), clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if getErr != nil {
 		return nil, getErr
 	}
@@ -111,7 +119,7 @@ func (s *EtcdTokenStorage) Reserve(token int, node string) (bool, error) {
 	lease := clientv3.NewLease(s.Client)
 	// The node has 30 minutes to import data from the other node, after that point another node can
 	// take over the token. The reason for the lease is to avoid interrupting large transfers.
-	grantResp, grantErr := lease.Grant(context.Background(), 3600/2)
+	grantResp, grantErr := lease.Grant(context.Background(), 1800)
 	if grantErr != nil {
 		return false, grantErr
 	}
@@ -131,12 +139,18 @@ func (s *EtcdTokenStorage) Release(token int) error {
 	return err
 }
 
+func (s *EtcdTokenStorage) Clear() error {
+	s.Client.Delete(context.Background(), s.path("initiated"), clientv3.WithPrefix())
+	_, err := s.Client.Delete(context.Background(), s.path(etcdStorageTokens), clientv3.WithPrefix())
+	return err
+}
+
 func (s *EtcdTokenStorage) Init(node string, numRanges int) error {
 	_, err := concurrency.NewSTM(s.Client, func(stm concurrency.STM) error {
 		initKey := s.path("initiated")
 		initiated := stm.Get(initKey)
 		if initiated == "true" {
-			return errors.New("Already initiated")
+			return errors.New("already initiated")
 		}
 		rangeSize := maxToken / numRanges
 		for i := 0; i < numRanges; i++ {
@@ -195,6 +209,7 @@ func (s *EtcdTokenStorage) InitMany(node string, numRanges int) (bool, error) {
 			s.Client.Delete(context.Background(), initKey)
 			return false, err
 		}
+		fmt.Printf("%d, ", i*rangeSize)
 	}
 	s.Release(0)
 	return true, nil

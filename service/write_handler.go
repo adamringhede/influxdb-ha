@@ -44,6 +44,9 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "missing parameter: db")
 		return
 	}
+	// Unless rp is defined, it will be "" which should result in the default RP for the DB.
+	rp := query.Get("rp")
+
 	precision := query.Get("precision")
 	if precision == "" {
 		precision = "nanoseconds"
@@ -52,7 +55,7 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	pointGroups := make(map[int][]models.Point)
 	broadcastGroup := []models.Point{}
 	for _, point := range points {
-		key, ok := h.partitioner.GetKeyByMeasurement(db, point.Name())
+		key, ok := h.partitioner.GetKeyByMeasurement(db, string(point.Name()))
 		if ok {
 			values := make(map[string][]string)
 			for _, tag := range point.Tags() {
@@ -97,10 +100,10 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		locations := h.resolver.FindAllNodes()
 		broadcastData := convertPointToBytes(broadcastGroup, precision)
 		go (func() {
-			relayErr := h.relayToLocations(locations, encodedQuery, auth, broadcastData)
+			relayErr := h.relayToLocations(locations, encodedQuery, auth, broadcastData, db, rp)
 			if relayErr != nil {
 				writeErr = writeErr
-				fmt.Printf("Failed to write: %s", relayErr.Error())
+				log.Printf("Failed to write: %s\n", relayErr.Error())
 			}
 			wg.Done()
 		})()
@@ -111,10 +114,10 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		go (func() { // TODO make the relaying into a channel so that we don't consume too much memory here
 			data := convertPointToBytes(points, precision)
 			locations := h.resolver.FindNodesByKey(numericHash, cluster.WRITE)
-			relayErr := h.relayToLocations(locations, encodedQuery, auth, data)
+			relayErr := h.relayToLocations(locations, encodedQuery, auth, data, db, rp)
 			if relayErr != nil {
 				writeErr = relayErr
-				fmt.Printf("Failed to write: %s", relayErr.Error())
+				log.Printf("Failed to write: %s\n", relayErr.Error())
 			}
 			wg.Done()
 		})()
@@ -152,7 +155,8 @@ func convertPointToBytes(points []models.Point, precision string) []byte {
 	return []byte(pointsString)
 }
 
-func (h *WriteHandler) relayToLocations(nodes []*cluster.Node, query string, auth string, buf []byte) error {
+func (h *WriteHandler) relayToLocations(nodes []*cluster.Node, query string, auth string, buf []byte, db, rp string) error {
+	var err error
 	for _, node := range nodes {
 		location := node.DataLocation
 		req, err := http.NewRequest("POST", "http://"+location+"/write?"+query, bytes.NewReader(buf))
@@ -186,27 +190,31 @@ func (h *WriteHandler) relayToLocations(nodes []*cluster.Node, query string, aut
 
 			// An alternative to the high availability setup is to not rely on tokens at all.
 			// It would then write everything to every node.
-			go (func() {
+			//go (func() {
 				// Retry the write before putting it in recovery storage
-				success := h.retryWrite(req)
-				if !success {
+				//success := h.retryWrite(req)
+				//if !success {
 					// TODO figure out if it is necessary to use database and rp
 					// or if this data is already saved in each point or if we can add defaults to the points.
-					h.recoveryStorage.Put(node.Name, "", "", buf)
-				}
-			})()
-			return responseErr
+					rErr := h.recoveryStorage.Put(node.Name, db, rp, buf)
+					if rErr != nil {
+						log.Printf("Recovery storage failed: %s\n", rErr.Error())
+					}
+				//}
+			//})()
+			err = responseErr
+			continue
 		}
 		if resp.StatusCode != 204 {
 			body, rErr := ioutil.ReadAll(resp.Body)
 			if rErr != nil {
 				log.Fatal(rErr)
 			}
-			return fmt.Errorf("Received error from InfluxDB: %s", string(body))
+			err =  fmt.Errorf("Received error from InfluxDB at %s: %s", location, string(body))
 		}
 
 	}
-	return nil
+	return err
 }
 
 func createRelayOutput(location string) relay.HTTPOutputConfig {

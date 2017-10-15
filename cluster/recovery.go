@@ -11,7 +11,11 @@ import (
 	"bytes"
 	"strconv"
 	"strings"
+	"log"
+	"io/ioutil"
 )
+
+const nodeFileKeySep = "@"
 
 type RecoveryChunk struct {
 	DB, RP string
@@ -45,21 +49,33 @@ func (s *LocalRecoveryStorage) getFilePath(nodeName, db, rp string) string {
 }
 
 func (s *LocalRecoveryStorage) getOrCreateFile(nodeName, db, rp string) (*os.File, error) {
-	filePath := s.getFilePath(nodeName, db, rp)
-	if f, ok := s.files[filePath]; ok {
+	fp := s.getFilePath(nodeName, db, rp)
+	if f, ok := s.files[nodeFileKey(nodeName, fp)]; ok {
 		return f, nil
 	}
-	f, err := os.OpenFile(filePath, os.O_WRONLY, os.ModeAppend)
+	f, err := os.OpenFile(fp, os.O_WRONLY, os.ModeAppend)
 	if _, ok := err.(*os.PathError); ok {
-		f, err = os.Create(filePath)
+		log.Printf("Creatings recovery file at %s", fp)
+		dir := filepath.Dir(fp)
+		if dir != "." {
+			err = os.MkdirAll(dir, os.ModePerm)
+			if err != nil {
+				return f, err
+			}
+		}
+		f, err = os.Create(fp)
 		f.WriteString(db + "\n")
 		f.WriteString(rp + "\n")
 	}
 	if err != nil {
 		return f, err
 	}
-	s.files[filePath] = f
+	s.files[nodeFileKey(nodeName, fp)] = f
 	return f, err
+}
+
+func nodeFileKey(nodeName, fp string) string {
+	return nodeName + nodeFileKeySep + fp
 }
 
 func (s *LocalRecoveryStorage) Put(nodeName, db, rp string, buf []byte) error {
@@ -67,9 +83,9 @@ func (s *LocalRecoveryStorage) Put(nodeName, db, rp string, buf []byte) error {
 	if err != nil {
 		return err
 	}
-	_, err = f.Write(append(buf, []byte("\n")...))
+	_, err = f.Write(buf)
 	if err != nil {
-		return fmt.Errorf("Failed to write recovery data: %s", err.Error())
+		return fmt.Errorf("failed to write recovery data: %s", err.Error())
 	}
 	err = f.Sync()
 	if err != nil {
@@ -78,7 +94,7 @@ func (s *LocalRecoveryStorage) Put(nodeName, db, rp string, buf []byte) error {
 	if s.hints != nil {
 		err = s.hints.Put(nodeName, StatusWaiting)
 		if err != nil {
-			return fmt.Errorf("Failed to put recovery hint: %s", err.Error())
+			return fmt.Errorf("failed to put recovery hint: %s", err.Error())
 		}
 	}
 	return nil
@@ -86,8 +102,17 @@ func (s *LocalRecoveryStorage) Put(nodeName, db, rp string, buf []byte) error {
 
 func (s *LocalRecoveryStorage) Drop(nodeName string) (err error) {
 	matches, err := filepath.Glob(s.getFilePath(nodeName, "*", "*"))
+	for key, file := range s.files {
+		if strings.Split(key, nodeFileKeySep)[0] == nodeName {
+			file.Close()
+			delete(s.files, key)
+		}
+	}
 	for _, filePath := range matches {
 		err = os.Remove(filePath)
+	}
+	if s.hints != nil {
+		s.hints.Done(nodeName)
 	}
 	return err
 }
@@ -96,6 +121,9 @@ func (s *LocalRecoveryStorage) Get(nodeName string) (chan RecoveryChunk, error) 
 	matches, err := filepath.Glob(s.getFilePath(nodeName, "*", "*"))
 	if err != nil {
 		return nil, err
+	}
+	if len(matches) == 0 {
+		fmt.Println("Recovery warning: No files were found at " + s.getFilePath(nodeName, "*", "*"))
 	}
 	ch := make(chan RecoveryChunk)
 	go func() {
@@ -151,34 +179,38 @@ func RecoverNodes(hs *EtcdHintStorage, data RecoveryStorage, nodes map[string]*N
 	client := &http.Client{Timeout:time.Second * 2}
 	for {
 		for target := range hs.Local {
+			log.Println("Found offline node, checking for signs of life...")
 			if targetNode, ok := nodes[target]; ok {
 				if isAlive(targetNode.DataLocation, client) {
 					err := recoverNode(targetNode, data)
 					if err == nil {
-						fmt.Printf("Finished recovering node %s\n", target)
+						log.Printf("Finished recovering node %s\n", target)
 						data.Drop(target)
 					} else {
-						fmt.Println(err.Error())
+						log.Println(err.Error())
 					}
 				}
+			} else {
+				log.Println("Error (recovery): The target node was not found in map of nodes")
 			}
 		}
-		time.Sleep(time.Second)
+		time.Sleep(time.Second * 3)
 	}
 }
 
 func recoverNode(node *Node, data RecoveryStorage) error {
 	ch, err := data.Get(node.Name)
 	if err != nil {
-		return fmt.Errorf("Failed to recover data for node %s when reading data: %s", node.Name, err.Error())
+		return fmt.Errorf("failed to recover data for node %s when reading data: %s", node.Name, err.Error())
 	}
 	for chunk := range ch {
-		resp, err := postData(node.DataLocation, chunk.RP, chunk.DB, chunk.Buf)
+		resp, err := postData(node.DataLocation, chunk.DB, chunk.RP, chunk.Buf)
 		if err != nil {
-			return fmt.Errorf("Failed to recover data for node %s. Got error: %s", node.Name, err.Error())
+			return fmt.Errorf("failed to recover data for node %s. Got error: %s", node.Name, err.Error())
 		}
 		if resp.StatusCode > 204 {
-			return fmt.Errorf("Failed to recover data for node %s. Received response code: %d", node.Name, resp.StatusCode)
+			body, _ := ioutil.ReadAll(resp.Body)
+			return fmt.Errorf("failed to recover data for node %s at %s. Received response code: %d and body %s", node.Name, node.DataLocation, resp.StatusCode, string(body))
 		}
  	}
 	return nil
@@ -186,7 +218,7 @@ func recoverNode(node *Node, data RecoveryStorage) error {
 
 func isAlive(location string, client *http.Client) bool {
 	values, _ := url.ParseQuery("q=SHOW DATABASES")
-	resp, err := client.Get("http://" + location + "/query?q=" + values.Encode())
+	resp, err := client.Get("http://" + location + "/query?" + values.Encode())
 	return err == nil && resp.StatusCode >= 200 && resp.StatusCode <= 299
 }
 

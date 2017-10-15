@@ -18,6 +18,7 @@ const etcdStorageHints = "hints"
 // HintStorage should hold information about what nodes hold data for a certain target node.
 type HintStorage interface {
 	Put(target string, status int) error
+	Done(target string) error
 	// GetByTarget returns the nodes that currently holds data for the node and the status of recovery
 	GetByTarget(target string) (map[string]int, error)
 	GetByHolder() ([]string, error)
@@ -53,7 +54,7 @@ func (s *EtcdHintStorage) Put(target string, status int) error {
 	return err
 }
 
-func (s *EtcdHintStorage) Done(target string, status int) error {
+func (s *EtcdHintStorage) Done(target string) error {
 	delete(s.Local, target)
 	_, err := s.Client.Delete(context.Background(), path.Join(s.path(etcdStorageHints), target, s.Holder))
 	return err

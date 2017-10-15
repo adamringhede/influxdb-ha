@@ -54,7 +54,7 @@ func main() {
 	nodeStorage := cluster.NewEtcdNodeStorage(c)
 	tokenStorage := cluster.NewEtcdTokenStorageWithClient(c)
 	hintsStorage := cluster.NewEtcdHintStorage(c, nodeName)
-	recoveryStorage := cluster.NewLocalRecoveryStorage("/data/influxdb_recovery/", hintsStorage)
+	recoveryStorage := cluster.NewLocalRecoveryStorage("./", hintsStorage)
 
 	localNode, nodeErr := nodeStorage.Get(nodeName)
 	handleErr(nodeErr)
@@ -173,7 +173,6 @@ func main() {
 		}
 	})()
 
-	// TODO need to subscribe to failed queries to be streamed to the recovery storage.
 	go cluster.RecoverNodes(hintsStorage, recoveryStorage, nodesMap)
 
 	httpConfig := service.Config{
@@ -339,7 +338,7 @@ func main2() {
 		Measurement: "treasures",
 		Tags:        []string{"type"},
 	})
-	service.Start(resolver, partitioner, httpConfig)
+	service.Start(resolver, partitioner, nil, httpConfig)
 }
 
 func createClusterHandle(clusterConfig cluster.Config, join *string) *cluster.Handle {
