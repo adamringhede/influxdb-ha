@@ -195,6 +195,7 @@ func (c *Coordinator) Handle(stmt *influxql.SelectStatement, r *http.Request, db
 			return request(stmt.String(), selectedLocation, client, r)
 		}
 	} else {
+		// TODO measurements without a partition key should be hashed to a certain token based on the measurement name #152176896
 		log.Printf("[Coordinator] Measurement %s - %s does not have a partition key. Selecting any node.", msmt.Database, msmt.Name)
 		locations = c.resolver.FindAll()
 		selectedLocation := locations[rand.Intn(len(locations))]
