@@ -19,6 +19,24 @@ func TestShowPartitionKeys(t *testing.T) {
 
 	result := mustQueryCluster(t, ch, "SHOW PARTITION KEYS")
 	assert.Len(t, result[0].Series[0].Values, 1)
+
+	result = mustQueryCluster(t, ch, "SHOW PARTITION KEYS ON test_db")
+	assert.Len(t, result[0].Series[0].Values, 1)
+
+	result = mustQueryCluster(t, ch, "SHOW PARTITION KEYS ON test_db2")
+	assert.Len(t, result[0].Series[0].Values, 0)
+}
+
+func TestCreatePartitionKey(t *testing.T) {
+	pks, ch := setupAdminTest()
+	mustQueryCluster(t, ch, "CREATE PARTITION KEY server_id ON test_db")
+
+	keys, _ := pks.GetAll()
+	assert.Len(t, keys, 1)
+	assert.Equal(t, "test_db", keys[0].Database)
+
+	statusCode, _  := mustNotQueryCluster(t, ch, "CREATE PARTITION KEY server_id ON test_db")
+	assert.Equal(t, 409, statusCode)
 }
 
 func TestDropPartitionKey(t *testing.T) {

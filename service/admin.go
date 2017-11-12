@@ -37,26 +37,49 @@ func (h *ClusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch stmt.(type) {
 	case clusterql.ShowPartitionKeysStatement:
 		keys, err := h.partitionKeyStorage.GetAll()
-		if err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
-		}
+		handleInternalError(w, err)
+		dbFilter := stmt.(clusterql.ShowPartitionKeysStatement).Database
 		columns := []string{"database", "measurement", "tags"}
 		values := [][]interface{}{}
 		for _, key := range keys {
-			values = append(values, []interface{}{key.Database, key.Measurement, strings.Join(key.Tags, ".")})
+			if dbFilter == "" || dbFilter == key.Database {
+				values = append(values, []interface{}{key.Database, key.Measurement, strings.Join(key.Tags, ".")})
+			}
 		}
 		respondWithResults(&w, createListResults("partition keys", columns, values))
 		return
+	case clusterql.CreatePartitionKeyStatement:
+		input := stmt.(clusterql.CreatePartitionKeyStatement)
+		partitionKey := &cluster.PartitionKey{Database: input.Database, Measurement: input.Measurement, Tags: input.Tags}
+		// check that one not already exists
+		// create and save one
+		keys, err := h.partitionKeyStorage.GetAll()
+		handleInternalError(w, err)
+		for _, pk := range keys {
+			if pk.Identifier() == partitionKey.Identifier() {
+				jsonError(w, http.StatusConflict, "a partition key already exist on " + pk.Identifier())
+				return
+			}
+		}
+		saveErr := h.partitionKeyStorage.Save(partitionKey)
+		handleInternalError(w, saveErr)
+		respondWithEmpty(&w)
 	case clusterql.DropPartitionKeyStatement:
 		err := h.partitionKeyStorage.Drop(
 			stmt.(clusterql.DropPartitionKeyStatement).Database,
 			stmt.(clusterql.DropPartitionKeyStatement).Measurement,
 		)
-		if err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
-		}
+		handleInternalError(w, err)
 		respondWithEmpty(&w)
 		return
+	default:
+		jsonError(w, http.StatusInternalServerError, "not implemented")
+	}
+}
+
+func handleInternalError(w http.ResponseWriter, err error) {
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
 	}
 }
 
