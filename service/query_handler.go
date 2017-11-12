@@ -72,15 +72,15 @@ func jsonError(w http.ResponseWriter, code int, message string) {
 	w.Write([]byte(data))
 }
 
-func respondWithResults(w *http.ResponseWriter, results []Result) {
-	(*w).Header().Set("Content-Type", "application/json")
+func respondWithResults(w http.ResponseWriter, results []Result) {
+	w.Header().Set("Content-Type", "application/json")
 	data, _ := json.Marshal(response{results})
-	(*w).Header().Add("X-InfluxDB-Version", "relay")
-	(*w).WriteHeader(http.StatusOK)
-	(*w).Write([]byte(data))
+	w.Header().Add("X-InfluxDB-Version", "relay")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(data))
 }
 
-func respondWithEmpty(w *http.ResponseWriter) {
+func respondWithEmpty(w http.ResponseWriter) {
 	respondWithResults(w, []Result{})
 }
 
@@ -266,7 +266,7 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// TODO replace with a custom ResultFlusher that can either save all
 		// results in memory and flushes in the end, or flushes every chunk received.
 		if len(allResults) > 0 {
-			respondWithResults(&w, allResults)
+			respondWithResults(w, allResults)
 			return
 		}
 		// This is the default handler.

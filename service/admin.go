@@ -46,7 +46,7 @@ func (h *ClusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				values = append(values, []interface{}{key.Database, key.Measurement, strings.Join(key.Tags, ".")})
 			}
 		}
-		respondWithResults(&w, createListResults("partition keys", columns, values))
+		respondWithResults(w, createListResults("partition keys", columns, values))
 		return
 	case clusterql.CreatePartitionKeyStatement:
 		input := stmt.(clusterql.CreatePartitionKeyStatement)
@@ -63,14 +63,14 @@ func (h *ClusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		saveErr := h.partitionKeyStorage.Save(partitionKey)
 		handleInternalError(w, saveErr)
-		respondWithEmpty(&w)
+		respondWithEmpty(w)
 	case clusterql.DropPartitionKeyStatement:
 		err := h.partitionKeyStorage.Drop(
 			stmt.(clusterql.DropPartitionKeyStatement).Database,
 			stmt.(clusterql.DropPartitionKeyStatement).Measurement,
 		)
 		handleInternalError(w, err)
-		respondWithEmpty(&w)
+		respondWithEmpty(w)
 		return
 	default:
 		jsonError(w, http.StatusInternalServerError, "not implemented")
