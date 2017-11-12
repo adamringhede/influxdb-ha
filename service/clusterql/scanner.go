@@ -37,6 +37,7 @@ const (
 	SET
 	DROP
 	CREATE
+	REMOVE
 
 	PARTITION
 	KEY
@@ -45,6 +46,7 @@ const (
 	WITH
 	REPLICATION
 	FACTOR
+	NODE
 )
 
 // Scanner represents a lexical scanner.
@@ -157,6 +159,10 @@ func (s *Scanner) scanIdent() (tok Token, lit string) {
 		return REPLICATION, buf.String()
 	case "FACTOR":
 		return FACTOR, buf.String()
+	case "REMOVE":
+		return REMOVE, buf.String()
+	case "NODE":
+		return NODE, buf.String()
 	}
 
 	str := buf.String()
@@ -229,6 +235,10 @@ func (t Token) Repr() string {
 		return "REPLICATION"
 	case FACTOR:
 		return "FACTOR"
+	case REMOVE:
+		return "REMOVE"
+	case NODE:
+		return "NODE"
 	case ON:
 		return "ON"
 	case STR:

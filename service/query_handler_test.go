@@ -35,7 +35,7 @@ func TestQueryHandler_Coordinator_NoGroupingMultipleNodesAggregation(t *testing.
 }
 
 
-func init() {
+func setup() {
 	clnt1 := newClient(influxOne)
 	clnt2 := newClient(influxTwo)
 	mustQuery(clnt1, "DROP DATABASE " + testDB)
@@ -63,8 +63,9 @@ func init() {
 	}, clnt2)
 
 	partitioner := newPartitioner()
+	pks := NewMockedPartitionKeyStorage()
 
-	go Start(resolver, partitioner, cluster.NewLocalRecoveryStorage("./", nil), Config{
+	go Start(resolver, partitioner, cluster.NewLocalRecoveryStorage("./", nil), pks, Config{
 		"0.0.0.0",
 		8099,
 	})
@@ -72,5 +73,6 @@ func init() {
 }
 
 func setUpSelectTest() influx.Client {
+	setup()
 	return newClient("localhost:8099")
 }

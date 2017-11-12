@@ -90,11 +90,11 @@ func (p *Partitioner) FulfillsKey(key PartitionKey, values map[string][]string) 
 }
 
 func (p *Partitioner) AddKey(key PartitionKey) {
-	p.partitionKeys[key.Database+ "." + key.Measurement] = key
+	p.partitionKeys[key.Identifier()] = key
 }
 
 func (p *Partitioner) RemoveKey(key PartitionKey) {
-	delete(p.partitionKeys, key.Database+ "." + key.Measurement)
+	delete(p.partitionKeys, key.Identifier())
 }
 
 func (p *Partitioner) GetKeyByMeasurement(db string, msmt string) (PartitionKey, bool) {
@@ -124,4 +124,15 @@ type PartitionKey struct {
 	// specified in the the key. Reads can only make use of it if all tags in the
 	// key are also in the query.
 	Tags []string
+}
+
+func (pk *PartitionKey) Identifier() string {
+	return CreatePartitionKeyIdentifier(pk.Database, pk.Measurement)
+}
+
+func CreatePartitionKeyIdentifier(database, measurement string) string {
+	if measurement == "" {
+		return database
+	}
+	return database + "." + measurement
 }

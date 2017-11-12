@@ -34,9 +34,9 @@ type response struct {
 	Results []Result `json:"results"`
 }
 
-func parseResp(resp *http.Response, chunked bool) response {
+func parseResp(body io.Reader, chunked bool) response {
 	fullResponse := response{}
-	scanner := bufio.NewScanner(resp.Body)
+	scanner := bufio.NewScanner(body)
 	for scanner.Scan() {
 		var r response
 		err := json.Unmarshal([]byte(scanner.Text()), &r)
@@ -80,6 +80,10 @@ func respondWithResults(w *http.ResponseWriter, results []Result) {
 	(*w).Write([]byte(data))
 }
 
+func respondWithEmpty(w *http.ResponseWriter) {
+	respondWithResults(w, []Result{})
+}
+
 func handleRouteError(target string, err error) {
 	if err != nil {
 		log.Fatal("route "+target+": ", err)
@@ -101,22 +105,29 @@ func request(statement string, host string, client *http.Client, r *http.Request
 		return results, errors.New("Failed request"), res
 	}
 	chunked := r.URL.Query().Get("chunked") == "true"
-	response := parseResp(res, chunked)
+	response := parseResp(res.Body, chunked)
 	return response.Results, nil, res
 }
 
 type QueryHandler struct {
-	client      *http.Client
-	resolver    *cluster.Resolver
-	partitioner *cluster.Partitioner
+	client         *http.Client
+	resolver       *cluster.Resolver
+	partitioner    *cluster.Partitioner
+	clusterHandler *ClusterHandler
 }
 
 func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	queryParam := r.URL.Query().Get("q")
 	if queryParam != "" {
 		allResults := []Result{}
-		q, parseErr := influxql.ParseQuery(r.URL.Query()["q"][0])
-		db := r.URL.Query()["db"][0]
+		if isAdminQuery(queryParam) {
+			// TODO add clust handler as a dependancy on query handler
+			//handleAdmin(w, r, queryParam)
+			h.clusterHandler.ServeHTTP(w, r)
+			return
+		}
+		q, parseErr := influxql.ParseQuery(queryParam)
+		db := r.URL.Query().Get("db")
 		if db == "" {
 			db = "default"
 		}
@@ -258,16 +269,16 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			respondWithResults(&w, allResults)
 			return
 		}
+		// This is the default handler.
+		all := h.resolver.FindAll()
+		log.Printf("Resolver found the following servers: %s", strings.Join(all, ", "))
+		location := all[rand.Intn(len(all))]
+		log.Print("Selected host at " + location)
+		baseUrl, _ := url.Parse("http://" + location + r.URL.Path)
+		baseUrl.RawQuery = r.URL.Query().Encode()
+		res, err := h.client.Post(baseUrl.String(), "", r.Body)
+		handleRouteError("query", err)
+		passBack(&w, res)
 	}
 
-	// This is the default handler.
-	all := h.resolver.FindAll()
-	log.Printf("Resolver found the following servers: %s", strings.Join(all, ", "))
-	location := all[rand.Intn(len(all))]
-	log.Print("Selected host at " + location)
-	baseUrl, _ := url.Parse("http://" + location + r.URL.Path)
-	baseUrl.RawQuery = r.URL.Query().Encode()
-	res, err := h.client.Post(baseUrl.String(), "", r.Body)
-	handleRouteError("query", err)
-	passBack(&w, res)
 }

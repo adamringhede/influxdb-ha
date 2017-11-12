@@ -13,11 +13,14 @@ type Config struct {
 	BindPort      int    `toml:"bind-port"`
 }
 
-func Start(resolver *cluster.Resolver, partitioner *cluster.Partitioner, recovery cluster.RecoveryStorage, config Config) {
+func Start(resolver *cluster.Resolver, partitioner *cluster.Partitioner, recovery cluster.RecoveryStorage,
+	pks cluster.PartitionKeyStorage, config Config) {
+
 	addr := config.BindAddr + ":" + strconv.FormatInt(int64(config.BindPort), 10)
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	http.Handle("/", &QueryHandler{client, resolver, partitioner})
+	ch := &ClusterHandler{pks}
+	http.Handle("/", &QueryHandler{client, resolver, partitioner, ch})
 	http.Handle("/write", &WriteHandler{client, resolver, partitioner, recovery})
 
 	log.Println("Listening on " + addr)

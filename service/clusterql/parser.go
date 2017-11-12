@@ -47,7 +47,7 @@ func (p *Parser) Parse() (Statement, error) {
 			} else if len(tree.Children) == 0 {
 				return nil, fmt.Errorf("internal error: a language spec leaf must have a handler")
 			} else {
-				return nil, fmt.Errorf("unexpected end of statement")
+				return nil, fmt.Errorf("unexpected end of statement, expecting %s", tokensToString(tree.Children))
 			}
 			break
 		}

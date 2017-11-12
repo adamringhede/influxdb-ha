@@ -10,6 +10,8 @@ func CreateLanguage() *Language {
 	lang.Spec(SHOW, PARTITION, KEYS, ON, STR).Handle(func (params Params) Statement {
 		return ShowPartitionKeysStatement{Database: params[0]}
 	})
+	// TODO Consider having/requiring database as a default parameter
+	// TODO Add validation
 	lang.Spec(CREATE, PARTITION, KEY, ON, STR, WITH, STR).Handle(func(params Params) Statement {
 		parts := strings.Split(params[0], ".")
 		tags := strings.Split(params[1], ".")
@@ -40,11 +42,18 @@ func CreateLanguage() *Language {
 		case 2:
 			return DropPartitionKeyStatement{parts[0], parts[1]}
 		}
+		// dropping a partitiion key will not immidiately remove it. a task will be created for first importing the
+		// data to all nodes that should have the data based on the new token assigned to the measurement.
+		// there is a delay of about a minute before starting the import in case te user changes its mind
 		return nil
 	})
+	// UPDATE PARTITION KEY ON
+	// This is practically what drop partition key does as well. All data need to be downloaded and the partition
+	// key tag updated before saveing the data in its new position.
 
 	// SET REPLICATION FACTOR 3 ON "mydb.mymeasurement" lang.Spec(SET, REPLICATION, FACTOR, NUM, ON, STR)
 	// SHOW REPLICATIONS FACTORS
+	// REMOVE NODE "node3"
 	return lang
 }
 

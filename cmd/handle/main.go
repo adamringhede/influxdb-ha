@@ -54,6 +54,8 @@ func main() {
 	nodeStorage := cluster.NewEtcdNodeStorage(c)
 	tokenStorage := cluster.NewEtcdTokenStorageWithClient(c)
 	hintsStorage := cluster.NewEtcdHintStorage(c, nodeName)
+	settingsStorage := cluster.NewEtcdSettingsStorage(c)
+	partitionKeyStorage := cluster.NewEtcdPartitionKeyStorage(c)
 	recoveryStorage := cluster.NewLocalRecoveryStorage("./", hintsStorage)
 
 	localNode, nodeErr := nodeStorage.Get(nodeName)
@@ -65,35 +67,33 @@ func main() {
 	}
 	localNode.DataLocation = *data
 
-	/*
-	If there are nodes
-	 */
+
 	if !isNew {
+		// Check if recovering (others nodes hold data)
 		selfHints, err := hintsStorage.GetByTarget(nodeName)
 		handleErr(err)
 		if len(selfHints) != 0 {
 			localNode.Status = cluster.NodeStatusRecovering
-			// TODO Manage node recovery status
-			// at least one other node is holding data that should be written to this one.
-			// wait for a certain amount of time for those nodes to start writing.
-			// the amount of time should be enough for common maintenance tasks.
-			// at this stage we should allow write requests, but not reads unless
-			// there is a configuration that allows this while recovering.
-			// when all the hints are deleted, the recovery is assumed done and we
-			// can update the node's status allow for reads.
-			// it no node is able to write data we can not completely recover.
-			// an admin will have to execute a cluster command to override this
-			// or delete the data.
+			nodeStorage.Save(localNode)
+			go (func() {
+				hintsChan := partitionKeyStorage.Watch()
+				hintWatch: for update := range hintsChan {
+					for _, event := range update.Events {
+						parts := strings.Split(string(event.Kv.Key), "/")
+						nodeName = parts[len(parts)-1]
+						if event.Type == mvccpb.DELETE && nodeName == localNode.Name {
+							localNode.Status = cluster.NodeStatusUp
+							nodeStorage.Save(localNode)
+							break hintWatch
+						}
+					}
+				}
+			})()
 		}
 	}
 
 	// TODO launch component to start pinging other data locations for their availability
 	// for which this node is holding data.
-	/*
-	1. for each node, ping
-	2. wait
-	3. once a node comes alive
-	 */
 
 	saveErr := nodeStorage.Save(localNode)
 	handleErr(saveErr)
@@ -104,6 +104,9 @@ func main() {
 	tokensMap, err := tokenStorage.Get()
 	handleErr(err)
 
+	defaultReplicationFactor, err := settingsStorage.GetDefaultReplicationFactor()
+	handleErr(err)
+
 	// store nodes as a map
 	nodesMap := make(map[string]*cluster.Node, len(nodes))
 	for _, node := range nodes {
@@ -111,6 +114,7 @@ func main() {
 	}
 
 	resolver := cluster.NewResolver()
+	resolver.ReplicationFactor = defaultReplicationFactor
 	for token, nodeName := range tokensMap {
 		if node, ok := nodesMap[nodeName]; ok {
 			resolver.AddToken(token, node)
@@ -118,6 +122,38 @@ func main() {
 			log.Fatalf("Could not find a node with name %s", nodeName)
 		}
 	}
+
+	partitioner := cluster.NewPartitioner()
+	partitioner.AddKey(cluster.PartitionKey{
+		Database:    "sharded",
+		Measurement: "treasures",
+		Tags:        []string{"type"},
+	})
+
+	go (func() {
+		for update := range partitionKeyStorage.Watch() {
+			for _, event := range update.Events {
+				var partitionKey cluster.PartitionKey
+				err := json.Unmarshal(event.Kv.Value, &partitionKey)
+				if err != nil {
+					log.Println("Failed to parse partition key from update: ", string(event.Kv.Value))
+				}
+				if event.Type == mvccpb.PUT {
+					partitioner.AddKey(partitionKey)
+				} else if event.Type == mvccpb.DELETE {
+					// Removing a partition key requires that data is re-distributed which must happen
+					// before the key is removed.
+					partitioner.RemoveKey(partitionKey)
+				}
+			}
+		}
+	})()
+
+	go (func() {
+		for rf := range settingsStorage.WatchDefaultReplicationFactor() {
+			resolver.ReplicationFactor = rf
+		}
+	})()
 
 	// Watch for changes to nodes
 	go (func() {
@@ -180,15 +216,8 @@ func main() {
 		BindPort: *bindClientPort,
 	}
 
-	// TODO get partitioner from a database and listen for changes which should be reflected here.
-	partitioner := cluster.NewPartitioner()
-	partitioner.AddKey(cluster.PartitionKey{
-		Database:    "sharded",
-		Measurement: "treasures",
-		Tags:        []string{"type"},
-	})
 	// Starting the service here so that the node can receive writes while joining.
-	go service.Start(resolver, partitioner, recoveryStorage, httpConfig)
+	go service.Start(resolver, partitioner, recoveryStorage, partitionKeyStorage, httpConfig)
 
 	if isNew {
 		mtx, err := tokenStorage.Lock()
