@@ -28,3 +28,7 @@ type SetReplicationFactorStatement struct {
 	Measurement string
 	Value int
 }
+
+type RemoveNodeStatement struct {
+	Name string
+}

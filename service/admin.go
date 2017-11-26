@@ -21,6 +21,7 @@ func isAdminQuery(queryParam string) bool {
 
 type ClusterHandler struct {
 	partitionKeyStorage cluster.PartitionKeyStorage
+	nodeStorage         cluster.NodeStorage
 }
 
 func (h *ClusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -57,10 +58,11 @@ func (h *ClusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		handleInternalError(w, err)
 		for _, pk := range keys {
 			if pk.Identifier() == partitionKey.Identifier() {
-				jsonError(w, http.StatusConflict, "a partition key already exist on " + pk.Identifier())
+				jsonError(w, http.StatusConflict, "a partition key already exist on "+pk.Identifier())
 				return
 			}
 		}
+		// It should not be possible to create a partition token for a collection that already has one.
 		saveErr := h.partitionKeyStorage.Save(partitionKey)
 		handleInternalError(w, saveErr)
 		respondWithEmpty(w)
@@ -72,6 +74,15 @@ func (h *ClusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		handleInternalError(w, err)
 		respondWithEmpty(w)
 		return
+	case clusterql.RemoveNodeStatement:
+		name := stmt.(clusterql.RemoveNodeStatement).Name
+		ok, err := h.nodeStorage.Remove(name)
+		handleInternalError(w, err)
+		if !ok {
+			jsonError(w, http.StatusNotFound, "could not find node with name \"" + name + "\"")
+			return
+		}
+		respondWithEmpty(w)
 	default:
 		jsonError(w, http.StatusInternalServerError, "not implemented")
 	}

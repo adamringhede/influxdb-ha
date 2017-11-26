@@ -317,6 +317,7 @@ func fetchSimple(q, location, db string) ([]result, error) {
 }
 
 func fetchTokenData(token int, location, db, rp string, measurement string) (chan result, error) {
+	// TODO limit data retrieved. Also consider allowign checkpointing with smaller amount of data.
 	resp, err := get(
 		`SELECT * FROM `+rp+"."+measurement+` WHERE ` + cluster.PartitionTagName +` = '`+strconv.Itoa(token)+`'`,
 		location,

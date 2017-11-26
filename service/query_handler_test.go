@@ -65,7 +65,7 @@ func setup() {
 	partitioner := newPartitioner()
 	pks := NewMockedPartitionKeyStorage()
 
-	go Start(resolver, partitioner, cluster.NewLocalRecoveryStorage("./", nil), pks, Config{
+	go Start(resolver, partitioner, cluster.NewLocalRecoveryStorage("./", nil), pks, nil, Config{
 		"0.0.0.0",
 		8099,
 	})

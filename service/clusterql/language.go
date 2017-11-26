@@ -47,13 +47,18 @@ func CreateLanguage() *Language {
 		// there is a delay of about a minute before starting the import in case te user changes its mind
 		return nil
 	})
+	lang.Spec(REMOVE, NODE, STR).Handle(func(params Params) Statement {
+		return RemoveNodeStatement{params[0]}
+	})
+
 	// UPDATE PARTITION KEY ON
 	// This is practically what drop partition key does as well. All data need to be downloaded and the partition
 	// key tag updated before saveing the data in its new position.
 
 	// SET REPLICATION FACTOR 3 ON "mydb.mymeasurement" lang.Spec(SET, REPLICATION, FACTOR, NUM, ON, STR)
 	// SHOW REPLICATIONS FACTORS
-	// REMOVE NODE "node3"
+	// Removing a node will redistribute tokens. Those nodes should then start to importing data just as
+	// if they joined the cluster initially.
 	return lang
 }
 

@@ -49,6 +49,14 @@ func TestDropPartitionKey(t *testing.T) {
 	assert.Len(t, keys, 0)
 }
 
+func TestRemoveNode(t *testing.T) {
+	_, ch := setupAdminTest()
+	ch.nodeStorage.Save(&cluster.Node{Name: "mynode"})
+	mustQueryCluster(t, ch, "REMOVE NODE mynode")
+	node, _ := ch.nodeStorage.Get("mynode")
+	assert.Nil(t, node)
+}
+
 func TestInvalidQueryFormat(t *testing.T) {
 	_, ch := setupAdminTest()
 	statusCode, msg := mustNotQueryCluster(t, ch,"DROP PARTITION")
@@ -58,7 +66,8 @@ func TestInvalidQueryFormat(t *testing.T) {
 
 func setupAdminTest() (cluster.PartitionKeyStorage, *ClusterHandler) {
 	pks := NewMockedPartitionKeyStorage()
-	ch := &ClusterHandler{pks}
+	ns := NewMockedNodeStorage()
+	ch := &ClusterHandler{partitionKeyStorage: pks, nodeStorage:ns}
 	return pks, ch
 }
 
@@ -84,6 +93,45 @@ func _execClusterCommand(ch *ClusterHandler, cmd string) *http.Response {
 	ch.ServeHTTP(w, req)
 	return w.Result()
 }
+
+type MockedNodeStorage struct {
+	nodes []*cluster.Node
+}
+
+func (ns *MockedNodeStorage) Remove(name string) (bool, error) {
+	for i, node := range ns.nodes {
+		if node.Name == name {
+			ns.nodes = append(ns.nodes[:i], ns.nodes[i+1:]...)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (ns *MockedNodeStorage) GetAll() ([]*cluster.Node, error) {
+	return ns.nodes, nil
+}
+
+func (ns *MockedNodeStorage) Get(name string) (*cluster.Node, error) {
+	for _, node := range ns.nodes {
+		if node.Name == name {
+			return node, nil
+		}
+	}
+	return nil, nil
+}
+
+func (ns *MockedNodeStorage) Save(node *cluster.Node) error {
+	if existing, _ := ns.Get(node.Name); existing == nil {
+		ns.nodes = append(ns.nodes, node)
+	}
+	return nil
+}
+
+func NewMockedNodeStorage() *MockedNodeStorage {
+	return &MockedNodeStorage{[]*cluster.Node{}}
+}
+
 
 type MockedPartitionKeyStorage struct {
 	storage []*cluster.PartitionKey
@@ -123,7 +171,7 @@ func startServer() {
 
 	pks.Save(&cluster.PartitionKey{"test_db", "cpu", []string{"server_id"}})
 
-	go Start(resolver, partitioner, cluster.NewLocalRecoveryStorage("./", nil), pks, Config{
+	go Start(resolver, partitioner, cluster.NewLocalRecoveryStorage("./", nil), pks, nil, Config{
 		"0.0.0.0",
 		8099,
 	})

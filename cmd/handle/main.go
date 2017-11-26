@@ -217,7 +217,7 @@ func main() {
 	}
 
 	// Starting the service here so that the node can receive writes while joining.
-	go service.Start(resolver, partitioner, recoveryStorage, partitionKeyStorage, httpConfig)
+	go service.Start(resolver, partitioner, recoveryStorage, partitionKeyStorage, nodeStorage, httpConfig)
 
 	if isNew {
 		mtx, err := tokenStorage.Lock()

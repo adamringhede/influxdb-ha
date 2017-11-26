@@ -12,7 +12,9 @@ type NodeStorage interface {
 	// Get returns the node by name or nil if not found
 	Get(string) (*Node, error)
 	// Save saves the node. It will overwrite existing data or insert the node.
-	Save(node Node)
+	Save(node *Node) error
+	// Remove removes a node by name
+	Remove(name string) (bool, error)
 }
 
 type EtcdNodeStorage struct {

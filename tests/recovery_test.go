@@ -19,6 +19,7 @@ var (
 	}
 )
 
+// TestRecovery tests that data not written to the stopped node will then be rewritten when that node becomes alive.
 func TestRecovery(t *testing.T) {
 	handle := utils.NewClient("192.168.99.100:8086")
 
@@ -46,8 +47,10 @@ func TestRecovery(t *testing.T) {
 
 	startNode(nodes[1])
 
-	// It should now be recovering
+	// Wait some time for recovering to work
 	time.Sleep(time.Millisecond * 2000)
+
+	// It should now be recovered.
 	assertData(t, clnt2, 2)
 }
 
