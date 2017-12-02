@@ -12,7 +12,7 @@ import (
 var clusterLanguage = clusterql.CreateLanguage()
 
 func isAdminQuery(queryParam string) bool {
-	matched, err := regexp.MatchString("(SHOW|DROP|CREATE|SET)\\s+(PARTITION|REPLICATION)", strings.ToUpper(queryParam))
+	matched, err := regexp.MatchString("(REMOVE|SHOW|DROP|CREATE|SET)\\s+(NODE|PARTITION|REPLICATION)", strings.ToUpper(queryParam))
 	if err != nil {
 		panic(err)
 	}
@@ -77,6 +77,7 @@ func (h *ClusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case clusterql.RemoveNodeStatement:
 		name := stmt.(clusterql.RemoveNodeStatement).Name
 		ok, err := h.nodeStorage.Remove(name)
+		// TODO distribute tokens to other clients and have them start importing data.
 		handleInternalError(w, err)
 		if !ok {
 			jsonError(w, http.StatusNotFound, "could not find node with name \"" + name + "\"")

@@ -1,7 +1,6 @@
 package tests
 
 import (
-	"os/exec"
 	"testing"
 
 	influx "github.com/influxdata/influxdb/client/v2"
@@ -9,14 +8,6 @@ import (
 	"github.com/adamringhede/influxdb-ha/tests/utils"
 	"github.com/stretchr/testify/assert"
 	"time"
-)
-
-var (
-	nodes = [][]string{
-		{"influxdb-handle", "influxdb-1"},
-		{"influxdb-handle2", "influxdb-2"},
-		{"influxdb-handle3", "influxdb-3"},
-	}
 )
 
 // TestRecovery tests that data not written to the stopped node will then be rewritten when that node becomes alive.
@@ -35,7 +26,7 @@ func TestRecovery(t *testing.T) {
 		assertData(t, clnt, 1)
 	}
 
-	stopNode(nodes[1])
+	utils.StopNode(utils.Nodes[1])
 
 	utils.WritePoints([]*influx.Point{
 		utils.NewPoint("trash", 10),
@@ -45,7 +36,7 @@ func TestRecovery(t *testing.T) {
 	time.Sleep(time.Millisecond * 50)
 	assertData(t, clnt1, 2)
 
-	startNode(nodes[1])
+	utils.StartNode(utils.Nodes[1])
 
 	// Wait some time for recovering to work
 	time.Sleep(time.Millisecond * 2000)
@@ -56,12 +47,17 @@ func TestRecovery(t *testing.T) {
 
 func assertData(t *testing.T, clnt influx.Client, count int) {
 	res := utils.MustQuery(clnt, `select value from treasures`)
-	assert.Len(t, res[0].Series[0].Values, count)
+	if count > 0 && assert.Len(t, res[0].Series, 1) {
+		assert.Len(t, res[0].Series[0].Values, count)
+	} else {
+		assert.Len(t, res[0].Series, 0)
+	}
+
 }
 
 func init() {
-	for _, node := range nodes {
-		startNode(node)
+	for _, node := range utils.Nodes {
+		utils.StartNode(node)
 	}
 	time.Sleep(time.Millisecond * 200)
 	clnt1 := utils.NewClient(utils.InfluxOne)
@@ -74,14 +70,4 @@ func init() {
 	utils.MustQuery(clnt3, "DROP DATABASE " + utils.TestDB)
 	utils.MustQuery(clnt3, "CREATE DATABASE " + utils.TestDB)
 	time.Sleep(time.Millisecond * 50)
-}
-
-func startNode(node []string) {
-	exec.Command("docker-compose", "start", node[1]).Run()
-	exec.Command("docker-compose", "start", node[0]).Run()
-}
-
-func stopNode(node []string) {
-	exec.Command("docker-compose", "stop", node[0]).Run()
-	exec.Command("docker-compose", "stop", node[1]).Run()
 }

@@ -52,6 +52,7 @@ func CreateLanguage() *Language {
 	})
 
 	// UPDATE PARTITION KEY ON
+	// UPDATE PARTITION KEY tags ON db.msmt AS new-msmt
 	// This is practically what drop partition key does as well. All data need to be downloaded and the partition
 	// key tag updated before saveing the data in its new position.
 
@@ -59,6 +60,8 @@ func CreateLanguage() *Language {
 	// SHOW REPLICATIONS FACTORS
 	// Removing a node will redistribute tokens. Those nodes should then start to importing data just as
 	// if they joined the cluster initially.
+
+	// BACKUP * TO s3://my-bucket/
 	return lang
 }
 

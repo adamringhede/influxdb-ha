@@ -16,7 +16,7 @@ import (
 
 const maxToken = 2147483647
 
-type tokenStorage interface {
+type TokenStorage interface {
 	Assign()
 	Get()
 	Reserve()

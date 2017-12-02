@@ -178,6 +178,9 @@ func main() {
 	})()
 
 	// Watch for changes to tokens and keep resolver in sync.
+	// TODO if a token is assigned to this node later on, then it needs to import data for that token
+	// from other nodes. This means that they should not be assigned, only reserved, until data is imported
+	// to adhere to the availability guarantees.
 	go (func() {
 		for update := range tokenStorage.Watch() {
 			for _, event := range update.Events {
@@ -332,42 +335,6 @@ func deleteTokensData(tokenLocations map[int]*cluster.Node) {
 		})()
 	}
 	g.Wait()
-}
-
-func main2() {
-	bindAddr := flag.String("addr", "0.0.0.0", "IP addres for listening on cluster communication")
-	bindPort := flag.Int("port", 8084, "Port for listening on cluster communication")
-	bindClientAddr := flag.String("client-addr", "0.0.0.0", "IP addres for client http requests")
-	bindClientPort := flag.Int("client-port", 8086, "Port for http requests")
-	data := flag.String("data", ":28086", "InfluxDB database port")
-	join := flag.String("join", "", "Comma seperated locations of other nodes")
-	flag.Parse()
-
-	clusterConfig := cluster.Config{
-		BindAddr:     *bindAddr,
-		BindPort:     *bindPort,
-		DataLocation: *data,
-	}
-	handle := createClusterHandle(clusterConfig, join)
-
-	resolver := cluster.NewResolver()
-	handle.TokenDelegate = &controller{resolver}
-	for _, token := range handle.LocalNode.Tokens {
-		handle.TokenDelegate.NotifyNewToken(token, &handle.LocalNode.Node)
-	}
-
-	httpConfig := service.Config{
-		BindAddr: *bindClientAddr,
-		BindPort: *bindClientPort,
-	}
-	// TODO get partitioner from a database and listen for changes which should be reflected here.
-	partitioner := cluster.NewPartitioner()
-	partitioner.AddKey(cluster.PartitionKey{
-		Database:    "sharded",
-		Measurement: "treasures",
-		Tags:        []string{"type"},
-	})
-	service.Start(resolver, partitioner, nil, httpConfig)
 }
 
 func createClusterHandle(clusterConfig cluster.Config, join *string) *cluster.Handle {
