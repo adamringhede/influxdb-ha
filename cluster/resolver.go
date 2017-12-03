@@ -26,7 +26,7 @@ func (r *Resolver) FindNodesByKey(key int, purpose int) []*Node {
 	partitions := r.collection.GetMultiple(key, r.ReplicationFactor)
 	nodesMap := make(map[*Node]bool)
 	for _, p := range partitions {
-		if purpose == READ && p.Node.Status == StatusRecovering {
+		if purpose == READ && p.Node.Status == NodeStatusRecovering {
 			continue
 		}
 		nodesMap[p.Node] = true

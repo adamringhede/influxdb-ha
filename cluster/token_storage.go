@@ -3,15 +3,16 @@ package cluster
 import (
 	"context"
 	"errors"
-	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/clientv3/concurrency"
-	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
+	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
-	"fmt"
-	"sort"
+
+	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/clientv3/concurrency"
+	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
 )
 
 const maxToken = 2147483647
@@ -36,7 +37,7 @@ func (s *EtcdTokenStorage) Watch() clientv3.WatchChan {
 }
 
 func (s *EtcdTokenStorage) Lock() (*concurrency.Mutex, error) {
-	mtx := concurrency.NewMutex(s.session, s.path("reserving"))
+	mtx := concurrency.NewMutex(s.session, s.path("reserving_tokens_init"))
 	err := mtx.Lock(context.Background())
 	if err != nil {
 		return nil, err

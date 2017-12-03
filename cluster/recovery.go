@@ -2,24 +2,24 @@ package cluster
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
-	"os"
-	"path/filepath"
-	"time"
+	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
-	"bytes"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
-	"log"
-	"io/ioutil"
+	"time"
 )
 
 const nodeFileKeySep = "@"
 
 type RecoveryChunk struct {
 	DB, RP string
-	Buf []byte
+	Buf    []byte
 }
 
 type RecoveryStorage interface {
@@ -117,6 +117,7 @@ func (s *LocalRecoveryStorage) Drop(nodeName string) (err error) {
 	return err
 }
 
+// Get returns chunks of data, each containing 500 points, in a channel
 func (s *LocalRecoveryStorage) Get(nodeName string) (chan RecoveryChunk, error) {
 	matches, err := filepath.Glob(s.getFilePath(nodeName, "*", "*"))
 	if err != nil {
@@ -176,7 +177,7 @@ func createFilename(nodeName, db, rp string) string {
 }
 
 func RecoverNodes(hs *EtcdHintStorage, data RecoveryStorage, nodes map[string]*Node) {
-	client := &http.Client{Timeout:time.Second * 2}
+	client := &http.Client{Timeout: time.Second * 2}
 	for {
 		for target := range hs.Local {
 			log.Println("Found offline node, checking for signs of life...")
@@ -212,7 +213,7 @@ func recoverNode(node *Node, data RecoveryStorage) error {
 			body, _ := ioutil.ReadAll(resp.Body)
 			return fmt.Errorf("failed to recover data for node %s at %s. Received response code: %d and body %s", node.Name, node.DataLocation, resp.StatusCode, string(body))
 		}
- 	}
+	}
 	return nil
 }
 

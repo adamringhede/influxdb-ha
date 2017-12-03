@@ -1,11 +1,13 @@
 package syncing
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
-	//"net/http"
+
 	"time"
+
 	"github.com/adamringhede/influxdb-ha/cluster"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/stretchr/testify/assert"
 )
 
 const influxOne = "192.168.99.100:28086"
@@ -33,7 +35,7 @@ func initiate() {
 	multiple(influxTwo, []string{
 		"DROP DATABASE " + testDB,
 	})
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 }
 
 func Test_fetchLocationMeta(t *testing.T) {
@@ -47,8 +49,8 @@ func Test_fetchLocationMeta(t *testing.T) {
 func TestImporter(t *testing.T) {
 	initiate()
 	resolver := cluster.NewResolver()
-	for _, token := range []int{0,100} {
-		resolver.AddToken(token,  &cluster.Node{[]int{}, cluster.NodeStatusUp, influxOne, "influx-1"})
+	for _, token := range []int{0, 100} {
+		resolver.AddToken(token, &cluster.Node{[]int{}, cluster.NodeStatusUp, influxOne, "influx-1"})
 	}
 
 	postLines(influxOne, testDB, "autogen", []string{
@@ -61,6 +63,7 @@ func TestImporter(t *testing.T) {
 
 	results, err := fetchSimple("SELECT * FROM treasures", influxTwo, testDB)
 	assert.NoError(t, err)
+	spew.Dump(results)
 	assert.Len(t, results[0].Series[0].Values, 1)
 	assert.Equal(t, "gold", results[0].Series[0].Values[0][2].(string))
 

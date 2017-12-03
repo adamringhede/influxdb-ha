@@ -1,15 +1,19 @@
 package cluster
 
 import (
-	"github.com/coreos/etcd/clientv3"
-	"strconv"
 	"context"
 	"path"
+	"strconv"
 	"strings"
+
+	"github.com/coreos/etcd/clientv3"
 )
 
+type HintStatus int
+
 const (
-	StatusWaiting = iota
+	// StatusWaiting is used to signal that the node is
+	StatusWaiting HintStatus = iota
 	StatusRecovering
 )
 
@@ -17,7 +21,7 @@ const etcdStorageHints = "hints"
 
 // HintStorage should hold information about what nodes hold data for a certain target node.
 type HintStorage interface {
-	Put(target string, status int) error
+	Put(target string, status HintStatus) error
 	Done(target string) error
 	// GetByTarget returns the nodes that currently holds data for the node and the status of recovery
 	GetByTarget(target string) (map[string]int, error)
@@ -27,7 +31,7 @@ type HintStorage interface {
 type EtcdHintStorage struct {
 	EtcdStorageBase
 	Holder string
-	Local map[string]bool
+	Local  map[string]bool
 }
 
 func NewEtcdHintStorage(c *clientv3.Client, holder string) *EtcdHintStorage {
@@ -48,9 +52,9 @@ func (s *EtcdHintStorage) Watch() clientv3.WatchChan {
 	return s.Client.Watch(context.Background(), s.path(etcdStorageHints), clientv3.WithPrefix())
 }
 
-func (s *EtcdHintStorage) Put(target string, status int) error {
+func (s *EtcdHintStorage) Put(target string, status HintStatus) error {
 	s.Local[target] = true
-	_, err := s.Client.Put(context.Background(), path.Join(s.path(etcdStorageHints), target, s.Holder), strconv.Itoa(status))
+	_, err := s.Client.Put(context.Background(), path.Join(s.path(etcdStorageHints), target, s.Holder), strconv.Itoa(int(status)))
 	return err
 }
 

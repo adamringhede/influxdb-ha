@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"github.com/adamringhede/influxdb-ha/cluster"
-	"github.com/influxdata/influxdb/models"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -13,15 +11,16 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/adamringhede/influxdb-ha/cluster"
+	"github.com/influxdata/influxdb/models"
 )
 
 type Loader interface {
 	get(q string, location string, db string, chunked bool)
 }
 
-
 // TODO implement a test loader that just returns json
-
 
 // TODO create an integration test that actually uses multiple influxdb databses and imports data from them.
 type Importer interface {
@@ -67,8 +66,6 @@ func (i *BasicImporter) Import(tokens []int, resolver *cluster.Resolver, target 
 		// use an exponential fallback if it continues to fail.
 		// at some point though we need to either give up on that token
 		// or cancel the import process.
-
-		// NOTE This is assuming that the data is sharded
 		for _, location := range nodes {
 			log.Printf("Starting to import for token %d from %s", token, location)
 			meta, ok := locationsMeta[location]
@@ -83,39 +80,46 @@ func (i *BasicImporter) Import(tokens []int, resolver *cluster.Resolver, target 
 			}
 			for db, dbMeta := range meta.databases {
 				if _, hasDB := createdDatabases[db]; !hasDB {
-					log.Printf("Creating database %s", db)
-					// TODO create users and retention policies as well
-					resp, err := get("CREATE DATABASE " + db, target, "", false)
-					if resp.StatusCode != 200 {
-						log.Fatalf("Received invalid status code %d", resp.StatusCode)
-					}
-					if err != nil {
-						log.Panic(err)
-					}
+					createDatabase(db, target)
 					createdDatabases[db] = true
 				}
-				for _, rp := range dbMeta.rps {
-					log.Printf("Exporting data from database and RP %s.%s", db, rp)
-					importCh, _ := fetchTokenData(token, location, db, rp, strings.Join(dbMeta.measurements, ","))
-					for res := range importCh {
-						lines := []string{}
-						for _, row := range res.Series {
-
-							lines = append(lines, parseLines(row, dbMeta.tagKeys)...)
-						}
-						_, err := postLines(target, db, rp, lines)
-						if err != nil {
-							// TODO handle any type of failure to write locally.
-							log.Panic("Failed to post data to local node.")
-						}
-					}
-				}
+				i.importTokenData(location, target, token, db, dbMeta)
 			}
-			// TODO find a better way to structure this to handle errors instead of panic.
 			break
 		}
 	}
 	log.Println("Finished import")
+}
+
+func (i *BasicImporter) importTokenData(location, target string, token int, db string, dbMeta *databaseMeta) {
+	for _, rp := range dbMeta.rps {
+		log.Printf("Exporting data from database and RP %s.%s", db, rp)
+		importCh, _ := fetchTokenData(token, location, db, rp, strings.Join(dbMeta.measurements, ","))
+		for res := range importCh {
+			lines := []string{}
+			for _, row := range res.Series {
+				lines = append(lines, parseLines(row, dbMeta.tagKeys)...)
+			}
+			_, err := postLines(target, db, rp, lines)
+			if err != nil {
+				// TODO handle any type of failure to write locally.
+				// TODO find a better way to structure this to handle errors instead of panic.
+				log.Panic("Failed to post data to local node.")
+			}
+		}
+	}
+}
+
+func createDatabase(db, target string) {
+	log.Printf("Creating database %s", db)
+	// TODO create users and retention policies as well
+	resp, err := get("CREATE DATABASE "+db, target, "", false)
+	if resp.StatusCode != 200 {
+		log.Fatalf("Received invalid status code %d", resp.StatusCode)
+	}
+	if err != nil {
+		log.Panic(err)
+	}
 }
 
 func postLines(location, db, rp string, lines []string) (*http.Response, error) {
@@ -185,8 +189,10 @@ func parseLines(row *models.Row, tagKeys map[string]bool) []string {
 
 func convertToString(value interface{}) string {
 	switch value.(type) {
-	case float64: return strconv.FormatFloat(value.(float64), 'f', 6, 64)
-	case float32: return strconv.FormatFloat(float64(value.(float32)), 'f', 6, 32)
+	case float64:
+		return strconv.FormatFloat(value.(float64), 'f', 6, 64)
+	case float32:
+		return strconv.FormatFloat(float64(value.(float32)), 'f', 6, 32)
 	}
 	return ""
 }
@@ -319,7 +325,7 @@ func fetchSimple(q, location, db string) ([]result, error) {
 func fetchTokenData(token int, location, db, rp string, measurement string) (chan result, error) {
 	// TODO limit data retrieved. Also consider allowign checkpointing with smaller amount of data.
 	resp, err := get(
-		`SELECT * FROM `+rp+"."+measurement+` WHERE ` + cluster.PartitionTagName +` = '`+strconv.Itoa(token)+`'`,
+		`SELECT * FROM `+rp+"."+measurement+` WHERE `+cluster.PartitionTagName+` = '`+strconv.Itoa(token)+`'`,
 		location,
 		db, true)
 	if err != nil {

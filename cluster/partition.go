@@ -10,7 +10,7 @@ type Partition struct {
 }
 
 // PartitionCollection is for partition look ups.
-// Partitions are on a ring and get methods returns a partition
+// Partitions are on a ring and "get" methods returns a partition
 // given a token on that ring. When finding multiple partitions
 // for a single token, multiple partitions are never returned for
 // belonging to the same node as that would undermine the replication factor.
@@ -92,9 +92,9 @@ func (c *PartitionCollection) GetReverse(key int, count int) []*Partition {
 		if _, ok := found[k]; !ok && k != key {
 			partition := node.Value.(*Partition)
 			//if _, alreadyAdded := unique[partition.Node.Name]; !alreadyAdded {
-				res = append(res, partition)
-				found[k] = true
-				unique[partition.Node.Name] = true
+			res = append(res, partition)
+			found[k] = true
+			unique[partition.Node.Name] = true
 			//}
 		} else {
 			break

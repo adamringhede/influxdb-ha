@@ -1,8 +1,9 @@
 package cluster
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestResolver_FindAll(t *testing.T) {
@@ -17,6 +18,7 @@ func TestResolver_FindAll(t *testing.T) {
 
 func TestResolver_FindByKey(t *testing.T) {
 	resolver := NewResolver()
+	resolver.ReplicationFactor = 2
 	assert.Len(t, resolver.FindByKey(2, READ), 0)
 
 	resolver.AddToken(1, &Node{[]int{1}, NodeStatusUp, ":8086", "local"})
@@ -54,5 +56,5 @@ func TestResolver_ReverseSecondaryLookup(t *testing.T) {
 	assert.Empty(t, resolver.ReverseSecondaryLookup(5))
 
 	// This illustrates that an uneven token distribution leads to some tokens to carry more data than others
-	assert.Equal(t, []int{3,4,5}, resolver.ReverseSecondaryLookup(6))
+	assert.Equal(t, []int{3, 4, 5}, resolver.ReverseSecondaryLookup(6))
 }
