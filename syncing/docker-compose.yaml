@@ -18,7 +18,7 @@ services:
 
 
   etcd-1:
-    image: quay.io/coreos/etcd:v3.1.4
+    image: quay.io/coreos/etcd:v3.2.11
     ports:
       - "2379:2379"
     hostname: etcd-1

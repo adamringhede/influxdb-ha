@@ -2,9 +2,10 @@ package syncing
 
 import (
 	"testing"
-	"github.com/stretchr/testify/assert"
 	"time"
+
 	"github.com/adamringhede/influxdb-ha/cluster"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDelete(t *testing.T) {

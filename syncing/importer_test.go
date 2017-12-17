@@ -13,6 +13,7 @@ import (
 const influxOne = "192.168.99.100:28086"
 const influxTwo = "192.168.99.100:27086"
 const influxThree = "192.168.99.100:26086"
+const etcdLoc = "192.168.99.100:2379"
 const testDB = "sharded"
 
 func multiple(location string, commands []string) {

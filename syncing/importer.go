@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -29,7 +30,7 @@ type Importer interface {
 	// Resume importing data
 	Resume()
 	// Import imports data for a set of nodes
-	Import([]int, cluster.Resolver, string)
+	Import(tokens []int, resolver cluster.Resolver, target string)
 }
 
 type BasicImporter struct {
@@ -93,7 +94,7 @@ func (i *BasicImporter) Import(tokens []int, resolver *cluster.Resolver, target 
 
 func (i *BasicImporter) importTokenData(location, target string, token int, db string, dbMeta *databaseMeta) {
 	for _, rp := range dbMeta.rps {
-		log.Printf("Exporting data from database and RP %s.%s", db, rp)
+		log.Printf("Exporting data from database %s.%s", db, rp)
 		importCh, _ := fetchTokenData(token, location, db, rp, strings.Join(dbMeta.measurements, ","))
 		for res := range importCh {
 			lines := []string{}
@@ -305,6 +306,7 @@ func fetchShow(name, location, db string) ([]string, error) {
 
 func fetchSimple(q, location, db string) ([]result, error) {
 	resp, err := get(q, location, db, false)
+	// TODO handle not able to connect
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +319,7 @@ func fetchSimple(q, location, db string) ([]result, error) {
 	jsonErr := json.Unmarshal(respData, &r)
 	// TODO Figure out what to do if we can't parse the data, which could happen if we are not requesting correctly.
 	if err != nil {
-		log.Panic(jsonErr)
+		log.Panic(fmt.Errorf("parsing fetched data failed: " + jsonErr.Error()))
 	}
 	return r.Results, nil
 }
