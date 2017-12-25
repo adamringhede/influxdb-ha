@@ -1,8 +1,9 @@
 package clusterql
 
 import (
-	"testing"
 	"strings"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -14,4 +15,3 @@ func TestParser_ParseShow(t *testing.T) {
 	assert.IsType(t, ShowPartitionKeysStatement{}, stmt)
 	assert.Equal(t, "mydb", stmt.(ShowPartitionKeysStatement).Database)
 }
-

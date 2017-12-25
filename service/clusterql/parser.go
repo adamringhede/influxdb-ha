@@ -2,8 +2,8 @@ package clusterql
 
 import (
 	//"fmt"
-	"io"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -40,7 +40,7 @@ func (p *Parser) Parse() (Statement, error) {
 	tree := p.lang.trees[tok]
 	params := Params{}
 	for {
-		tok, lit := p.scanIgnoreWhitespace()
+		tok, lit = p.scanIgnoreWhitespace()
 		if tok == EOF {
 			if tree.Handler != nil {
 				return tree.Handler(params), nil

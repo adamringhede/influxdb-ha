@@ -1,18 +1,19 @@
 package service
 
 import (
-	"github.com/adamringhede/influxdb-ha/cluster"
-	"github.com/adamringhede/influxdb-ha/service/clusterql"
-	"github.com/influxdata/influxdb/models"
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/adamringhede/influxdb-ha/cluster"
+	"github.com/adamringhede/influxdb-ha/service/clusterql"
+	"github.com/influxdata/influxdb/models"
 )
 
 var clusterLanguage = clusterql.CreateLanguage()
 
 func isAdminQuery(queryParam string) bool {
-	matched, err := regexp.MatchString("(REMOVE|SHOW|DROP|CREATE|SET)\\s+(NODE|PARTITION|REPLICATION)", strings.ToUpper(queryParam))
+	matched, err := regexp.MatchString("(REMOVE|SHOW|DROP|CREATE|SET)\\s+(NODES|NODE|PARTITION|REPLICATION)", strings.ToUpper(queryParam))
 	if err != nil {
 		panic(err)
 	}
@@ -80,10 +81,20 @@ func (h *ClusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// TODO distribute tokens to other clients and have them start importing data.
 		handleInternalError(w, err)
 		if !ok {
-			jsonError(w, http.StatusNotFound, "could not find node with name \"" + name + "\"")
+			jsonError(w, http.StatusNotFound, "could not find node with name \""+name+"\"")
 			return
 		}
 		respondWithEmpty(w)
+		return
+	case clusterql.ShowNodesStatement:
+		values := [][]interface{}{}
+		nodes, err := h.nodeStorage.GetAll()
+		handleInternalError(w, err)
+		for _, node := range nodes {
+			values = append(values, []interface{}{node.Name, node.DataLocation})
+		}
+		respondWithResults(w, createListResults("nodes", []string{"name", "location"}, values))
+		return
 	default:
 		jsonError(w, http.StatusInternalServerError, "not implemented")
 	}

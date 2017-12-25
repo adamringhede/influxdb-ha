@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"io"
-	"strings"
 	"strconv"
+	"strings"
 )
 
 type Token int
@@ -25,10 +25,10 @@ const (
 	LIST
 
 	// Misc characters
-	ASTERISK // *
-	COMMA    // ,
+	ASTERISK  // *
+	COMMA     // ,
 	SEMICOLON // ;
-	QUOTE    // "
+	QUOTE     // "
 
 	// Keywords
 	SELECT
@@ -47,6 +47,7 @@ const (
 	REPLICATION
 	FACTOR
 	NODE
+	NODES
 )
 
 // Scanner represents a lexical scanner.
@@ -163,6 +164,8 @@ func (s *Scanner) scanIdent() (tok Token, lit string) {
 		return REMOVE, buf.String()
 	case "NODE":
 		return NODE, buf.String()
+	case "NODES":
+		return NODES, buf.String()
 	}
 
 	str := buf.String()
@@ -227,6 +230,10 @@ func (t Token) Repr() string {
 		return "CREATE"
 	case PARTITION:
 		return "PARTITION"
+	case NODE:
+		return "NODE"
+	case NODES:
+		return "NODES"
 	case KEY:
 		return "KEY"
 	case KEYS:
@@ -237,8 +244,6 @@ func (t Token) Repr() string {
 		return "FACTOR"
 	case REMOVE:
 		return "REMOVE"
-	case NODE:
-		return "NODE"
 	case ON:
 		return "ON"
 	case STR:

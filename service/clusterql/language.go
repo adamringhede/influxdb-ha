@@ -4,10 +4,10 @@ import "strings"
 
 func CreateLanguage() *Language {
 	lang := NewLanguage()
-	lang.Spec(SHOW, PARTITION, KEYS).Handle(func (params Params) Statement {
+	lang.Spec(SHOW, PARTITION, KEYS).Handle(func(params Params) Statement {
 		return ShowPartitionKeysStatement{}
 	})
-	lang.Spec(SHOW, PARTITION, KEYS, ON, STR).Handle(func (params Params) Statement {
+	lang.Spec(SHOW, PARTITION, KEYS, ON, STR).Handle(func(params Params) Statement {
 		return ShowPartitionKeysStatement{Database: params[0]}
 	})
 	// TODO Consider having/requiring database as a default parameter
@@ -47,6 +47,9 @@ func CreateLanguage() *Language {
 		// there is a delay of about a minute before starting the import in case te user changes its mind
 		return nil
 	})
+	lang.Spec(SHOW, NODES).Handle(func(params Params) Statement {
+		return ShowNodesStatement{}
+	})
 	lang.Spec(REMOVE, NODE, STR).Handle(func(params Params) Statement {
 		return RemoveNodeStatement{params[0]}
 	})
@@ -66,7 +69,7 @@ func CreateLanguage() *Language {
 }
 
 type Params []string
-type Handler func (Params) Statement
+type Handler func(Params) Statement
 
 type Tree struct {
 	Children map[Token]*Tree

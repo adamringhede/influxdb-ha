@@ -26,8 +26,10 @@ type ShowReplicationFactorsStatement struct {
 type SetReplicationFactorStatement struct {
 	Database    string
 	Measurement string
-	Value int
+	Value       int
 }
+
+type ShowNodesStatement struct{}
 
 type RemoveNodeStatement struct {
 	Name string

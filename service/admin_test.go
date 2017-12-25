@@ -1,19 +1,20 @@
 package service
 
 import (
-	"github.com/adamringhede/influxdb-ha/cluster"
-	"github.com/stretchr/testify/assert"
-	"testing"
-	"github.com/coreos/etcd/clientv3"
+	"io/ioutil"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"net/http"
-	"io/ioutil"
 	"strings"
+	"testing"
+
+	"github.com/adamringhede/influxdb-ha/cluster"
+	"github.com/coreos/etcd/clientv3"
+	"github.com/stretchr/testify/assert"
 )
 
-
 func TestShowPartitionKeys(t *testing.T) {
+	t.Parallel()
 	pks, ch := setupAdminTest()
 	pks.Save(&cluster.PartitionKey{"test_db", "cpu", []string{"server_id"}})
 
@@ -28,6 +29,7 @@ func TestShowPartitionKeys(t *testing.T) {
 }
 
 func TestCreatePartitionKey(t *testing.T) {
+	t.Parallel()
 	pks, ch := setupAdminTest()
 	mustQueryCluster(t, ch, "CREATE PARTITION KEY server_id ON test_db")
 
@@ -35,11 +37,12 @@ func TestCreatePartitionKey(t *testing.T) {
 	assert.Len(t, keys, 1)
 	assert.Equal(t, "test_db", keys[0].Database)
 
-	statusCode, _  := mustNotQueryCluster(t, ch, "CREATE PARTITION KEY server_id ON test_db")
+	statusCode, _ := mustNotQueryCluster(t, ch, "CREATE PARTITION KEY server_id ON test_db")
 	assert.Equal(t, 409, statusCode)
 }
 
 func TestDropPartitionKey(t *testing.T) {
+	t.Parallel()
 	pks, ch := setupAdminTest()
 	pks.Save(&cluster.PartitionKey{"test_db", "cpu", []string{"server_id"}})
 
@@ -49,7 +52,16 @@ func TestDropPartitionKey(t *testing.T) {
 	assert.Len(t, keys, 0)
 }
 
+func TestShowNodes(t *testing.T) {
+	t.Parallel()
+	_, ch := setupAdminTest()
+	ch.nodeStorage.Save(&cluster.Node{Name: "mynode"})
+	results := mustQueryCluster(t, ch, "SHOW NODES")
+	assert.Len(t, results[0].Series[0].Values, 1)
+}
+
 func TestRemoveNode(t *testing.T) {
+	t.Parallel()
 	_, ch := setupAdminTest()
 	ch.nodeStorage.Save(&cluster.Node{Name: "mynode"})
 	mustQueryCluster(t, ch, "REMOVE NODE mynode")
@@ -58,8 +70,9 @@ func TestRemoveNode(t *testing.T) {
 }
 
 func TestInvalidQueryFormat(t *testing.T) {
+	t.Parallel()
 	_, ch := setupAdminTest()
-	statusCode, msg := mustNotQueryCluster(t, ch,"DROP PARTITION")
+	statusCode, msg := mustNotQueryCluster(t, ch, "DROP PARTITION")
 	assert.Equal(t, statusCode, 400)
 	assert.Equal(t, `{"error":"error parsing query: unexpected end of statement, expecting KEY"}`, msg)
 }
@@ -67,7 +80,7 @@ func TestInvalidQueryFormat(t *testing.T) {
 func setupAdminTest() (cluster.PartitionKeyStorage, *ClusterHandler) {
 	pks := NewMockedPartitionKeyStorage()
 	ns := NewMockedNodeStorage()
-	ch := &ClusterHandler{partitionKeyStorage: pks, nodeStorage:ns}
+	ch := &ClusterHandler{partitionKeyStorage: pks, nodeStorage: ns}
 	return pks, ch
 }
 
@@ -83,12 +96,18 @@ func mustNotQueryCluster(t *testing.T, ch *ClusterHandler, cmd string) (int, str
 
 func mustQueryCluster(t *testing.T, ch *ClusterHandler, cmd string) []Result {
 	resp := _execClusterCommand(ch, cmd)
-	assert.Equal(t, 200, resp.StatusCode)
+	if resp.StatusCode != 200 {
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			panic(err)
+		}
+		assert.Equal(t, 200, resp.StatusCode, "Body: %s", string(body))
+	}
 	return parseResp(resp.Body, false).Results
 }
 
 func _execClusterCommand(ch *ClusterHandler, cmd string) *http.Response {
-	req := httptest.NewRequest("GET", "http://localhost?q=" + url.QueryEscape(cmd), nil)
+	req := httptest.NewRequest("GET", "http://localhost?q="+url.QueryEscape(cmd), nil)
 	w := httptest.NewRecorder()
 	ch.ServeHTTP(w, req)
 	return w.Result()
@@ -132,7 +151,6 @@ func NewMockedNodeStorage() *MockedNodeStorage {
 	return &MockedNodeStorage{[]*cluster.Node{}}
 }
 
-
 type MockedPartitionKeyStorage struct {
 	storage []*cluster.PartitionKey
 }
@@ -166,7 +184,7 @@ func (s *MockedPartitionKeyStorage) GetAll() ([]*cluster.PartitionKey, error) {
 
 func startServer() {
 	resolver := cluster.NewResolver()
-	partitioner :=  cluster.NewPartitioner()
+	partitioner := cluster.NewPartitioner()
 	pks := NewMockedPartitionKeyStorage()
 
 	pks.Save(&cluster.PartitionKey{"test_db", "cpu", []string{"server_id"}})
