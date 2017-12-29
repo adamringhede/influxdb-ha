@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"encoding/json"
+
 	"github.com/coreos/etcd/clientv3"
 )
 
@@ -15,10 +16,13 @@ type NodeStorage interface {
 	Save(node *Node) error
 	// Remove removes a node by name
 	Remove(name string) (bool, error)
+	// OnRemove is passed a handler to be called when a node is removed.
+	OnRemove(func(Node))
 }
 
 type EtcdNodeStorage struct {
 	EtcdStorageBase
+	onRemoveHandler func(Node)
 }
 
 func NewEtcdNodeStorage(c *clientv3.Client) *EtcdNodeStorage {
@@ -36,12 +40,12 @@ func (s *EtcdNodeStorage) Save(node *Node) error {
 	if err != nil {
 		return err
 	}
-	s.Client.Put(context.Background(), s.path("nodes/" + node.Name), string(data))
+	s.Client.Put(context.Background(), s.path("nodes/"+node.Name), string(data))
 	return nil
 }
 
 func (s *EtcdNodeStorage) Get(name string) (*Node, error) {
-	resp, getErr := s.Client.Get(context.Background(), s.path("nodes/" + name))
+	resp, getErr := s.Client.Get(context.Background(), s.path("nodes/"+name))
 	if getErr != nil || resp.Count == 0 {
 		return nil, getErr
 	}
@@ -70,12 +74,28 @@ func (s *EtcdNodeStorage) GetAll() ([]*Node, error) {
 	return nodes, nil
 }
 
+func (s *EtcdNodeStorage) OnRemove(h func(Node)) {
+	if s.onRemoveHandler != nil {
+		panic("OnRemove is already defined")
+	}
+	s.onRemoveHandler = h
+}
+
 func (s *EtcdNodeStorage) Remove(name string) (bool, error) {
-	resp, err := s.Client.Delete(context.Background(), s.path("nodes/" + name))
+	node, err := s.Get(name)
+	if node == nil {
+		return false, nil
+	}
+	resp, err := s.Client.Delete(context.Background(), s.path("nodes/"+name))
 	if err != nil {
 		return false, err
 	}
-	return resp.Deleted > 0, nil
+	if resp.Deleted > 0 {
+		// TODO Handle failure here. If this fails, then the data may be lost.
+		s.onRemoveHandler(*node)
+		return true, nil
+	}
+	return false, nil
 }
 
 func (s *EtcdNodeStorage) RemoveAll(name string) (int, error) {

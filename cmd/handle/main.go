@@ -1,20 +1,21 @@
 package main
 
 import (
-	"flag"
-	"github.com/adamringhede/influxdb-ha/cluster"
-	"github.com/adamringhede/influxdb-ha/service"
-	"github.com/coreos/etcd/clientv3"
-	"log"
-	"os"
-	"strings"
-	"time"
-	"github.com/coreos/etcd/mvcc/mvccpb"
-	"strconv"
 	"context"
 	"encoding/json"
-	"github.com/adamringhede/influxdb-ha/syncing"
+	"flag"
+	"log"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
+
+	"github.com/adamringhede/influxdb-ha/cluster"
+	"github.com/adamringhede/influxdb-ha/service"
+	"github.com/adamringhede/influxdb-ha/syncing"
+	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/mvcc/mvccpb"
 )
 
 type controller struct {
@@ -35,6 +36,14 @@ func handleErr(err error) {
 	}
 }
 
+func startImporter(etcdClient *clientv3.Client, resolver *cluster.Resolver, localNode cluster.Node) (*syncing.ReliableImporter, cluster.WorkQueue) {
+	importer := &syncing.BasicImporter{}
+	wq := cluster.NewEtcdWorkQueue(etcdClient, localNode.Name, syncing.ReliableImportWorkName)
+	reliableImporter := syncing.NewReliableImporter(importer, wq, resolver, localNode.DataLocation)
+	reliableImporter.Start()
+	return reliableImporter, wq
+}
+
 func main() {
 	bindClientAddr := flag.String("client-addr", "0.0.0.0", "IP addres for client http requests")
 	bindClientPort := flag.Int("client-port", 8086, "Port for http requests")
@@ -49,6 +58,7 @@ func main() {
 	handleErr(etcdErr)
 
 	// TODO Only default to hostname, prefer using a configurable id
+	// Maybe create a unique ID upon first time, save it on the local file system and reuse it next time.
 	nodeName, hostErr := os.Hostname()
 	handleErr(hostErr)
 	nodeStorage := cluster.NewEtcdNodeStorage(c)
@@ -67,9 +77,9 @@ func main() {
 	}
 	localNode.DataLocation = *data
 
-
 	if !isNew {
 		// Check if recovering (others nodes hold data)
+		// TODO Seperate this into something that can be tested
 		selfHints, err := hintsStorage.GetByTarget(nodeName)
 		handleErr(err)
 		if len(selfHints) != 0 {
@@ -77,7 +87,8 @@ func main() {
 			nodeStorage.Save(localNode)
 			go (func() {
 				hintsChan := partitionKeyStorage.Watch()
-				hintWatch: for update := range hintsChan {
+			hintWatch:
+				for update := range hintsChan {
 					for _, event := range update.Events {
 						parts := strings.Split(string(event.Kv.Key), "/")
 						nodeName = parts[len(parts)-1]
@@ -122,6 +133,38 @@ func main() {
 			log.Fatalf("Could not find a node with name %s", nodeName)
 		}
 	}
+
+	_, importWQ := startImporter(c, resolver, *localNode)
+
+	nodeStorage.OnRemove(func(removedNode cluster.Node) {
+		// Distribute tokens to other nodes
+		nodes := []string{}
+		tokenGroups := map[string][]int{}
+		for name := range nodesMap {
+			if name != removedNode.Name {
+				if _, ok := tokenGroups[name]; !ok {
+					nodes = append(nodes, name)
+					tokenGroups[name] = []int{}
+				}
+			}
+		}
+		tokensMap, err := tokenStorage.Get()
+		if err != nil {
+			return
+		}
+		var i int
+		for token, nodeName := range tokensMap {
+			if nodeName != removedNode.Name {
+				selectedNode := nodes[i%len(nodes)]
+				tokenGroups[selectedNode] = append(tokenGroups[selectedNode], token)
+				tokenGroups[selectedNode] = append(tokenGroups[selectedNode], resolver.ReverseSecondaryLookup(token)...)
+				i++
+			}
+		}
+		for nodeName, tokens := range tokenGroups {
+			importWQ.Push(nodeName, syncing.ReliableImportPayload{Tokens: tokens})
+		}
+	})
 
 	partitioner := cluster.NewPartitioner()
 	partitioner.AddKey(cluster.PartitionKey{
@@ -203,6 +246,7 @@ func main() {
 					}
 					if ok {
 						resolver.AddToken(token, node)
+						tokensMap[token] = nodeName
 					}
 				}
 				if event.Type == mvccpb.DELETE {
@@ -271,8 +315,8 @@ func join(localNode *cluster.Node, tokenStorage *cluster.EtcdTokenStorage, resol
 		// TODO handle not ok
 	}
 
-	importer := syncing.BasicImporter{}
 	log.Println("Starting import of primary data")
+	importer := &syncing.BasicImporter{}
 	importer.Import(reserved, resolver, localNode.DataLocation)
 
 	oldPrimaries := map[int]*cluster.Node{}
@@ -318,13 +362,13 @@ func join(localNode *cluster.Node, tokenStorage *cluster.EtcdTokenStorage, resol
 
 func deleteTokensData(tokenLocations map[int]*cluster.Node) {
 	/*
-	this should just add a job in a queue to be picked up by the agent running at that node.
-	that is if we want to be able to add a new node while another one is unavailable.
-	if this is not a requirement, we can just make the delete request here.
-	The danger with having the same data on multiple locations without intended replication,
-	queries merging data from multiple nodes may receive incorrect results.
-	This could however be avoided by filtering on partitionToken for those that should be on that
-	node. An alternative is to have a background job that clears out data from nodes where it should not be.
+		this should just add a job in a queue to be picked up by the agent running at that node.
+		that is if we want to be able to add a new node while another one is unavailable.
+		if this is not a requirement, we can just make the delete request here.
+		The danger with having the same data on multiple locations without intended replication,
+		queries merging data from multiple nodes may receive incorrect results.
+		This could however be avoided by filtering on partitionToken for those that should be on that
+		node. An alternative is to have a background job that clears out data from nodes where it should not be.
 	*/
 	g := sync.WaitGroup{}
 	g.Add(len(tokenLocations))
