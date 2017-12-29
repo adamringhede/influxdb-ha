@@ -1,21 +1,22 @@
 package service
 
 import (
-	"github.com/adamringhede/influxdb-ha/cluster"
 	"log"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/adamringhede/influxdb-ha/cluster"
 )
 
 type Config struct {
-	BindAddr      string `toml:"bind-addr"`
-	BindPort      int    `toml:"bind-port"`
+	BindAddr string `toml:"bind-addr"`
+	BindPort int    `toml:"bind-port"`
 }
 
 func Start(
 	resolver *cluster.Resolver,
-	partitioner *cluster.Partitioner,
+	partitioner cluster.Partitioner,
 	recovery cluster.RecoveryStorage,
 	pks cluster.PartitionKeyStorage,
 	ns cluster.NodeStorage,

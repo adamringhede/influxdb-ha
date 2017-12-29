@@ -1,16 +1,17 @@
 package service
 
 import (
-	"github.com/adamringhede/influxdb-ha/cluster"
-	"github.com/influxdata/influxdb/influxql"
+	"fmt"
+	"log"
 	"math/rand"
 	"net/http"
-	"time"
-	"log"
-	"fmt"
-	"github.com/adamringhede/influxdb-ha/service/merge"
-	"github.com/influxdata/influxdb/models"
 	"strings"
+	"time"
+
+	"github.com/adamringhede/influxdb-ha/cluster"
+	"github.com/adamringhede/influxdb-ha/service/merge"
+	"github.com/influxdata/influxdb/influxql"
+	"github.com/influxdata/influxdb/models"
 )
 
 // Coordinator handles a SELECT query using partition keys and a resolver.
@@ -23,7 +24,7 @@ import (
 type Coordinator struct {
 	resolver *cluster.Resolver
 	//partitionKeys map[string]cluster.PartitionKey
-	partitioner *cluster.Partitioner
+	partitioner cluster.Partitioner
 }
 
 func groupResultsByTags(allResults [][]Result) map[string][]Result {
@@ -64,7 +65,7 @@ func mergeSortResults(groupedResults map[string][]Result) []Result {
 		merged := Result{}
 		merged.Series = []*models.Row{{
 			Columns: []string{},
-			Values: [][]interface{}{},
+			Values:  [][]interface{}{},
 		}}
 		allDone := false
 		for !allDone {
@@ -99,7 +100,7 @@ func mergeQueryResults(groupedResults map[string][]Result, tree *merge.QueryTree
 		merged := Result{}
 		merged.Series = []*models.Row{{
 			Columns: []string{"time"},
-			Values: [][]interface{}{},
+			Values:  [][]interface{}{},
 		}}
 		for src.Reset(); !src.Done(); src.Step() {
 			for _, f := range tree.Fields {
@@ -111,7 +112,7 @@ func mergeQueryResults(groupedResults map[string][]Result, tree *merge.QueryTree
 				switch f.Root.(type) {
 				case *merge.Top, *merge.Bottom:
 					// TODO Add support for adding multiple values. Note that in 1.3 is is no longe possible to use
-					// both aggregations function and top/bottom which makes this easier. 
+					// both aggregations function and top/bottom which makes this easier.
 				}
 				value = append(value, f.Root.Next(src)[0])
 			}
@@ -146,11 +147,11 @@ func (c *Coordinator) Handle(stmt *influxql.SelectStatement, r *http.Request, db
 		tagValues := getTagValues(stmt)
 		if !c.partitioner.FulfillsKey(pKey, tagValues) {
 			/*
-			TODO
-			If the key is not fulfilled, ideally n / rf nodes need to be queried as the data
-			is partitioned and the query will need to reach all servers.
-			However, finding those as well as the replicas if one fails is trickier.
-			 */
+				TODO
+				If the key is not fulfilled, ideally n / rf nodes need to be queried as the data
+				is partitioned and the query will need to reach all servers.
+				However, finding those as well as the replicas if one fails is trickier.
+			*/
 			return []Result{}, fmt.Errorf("The partition key is not fulfilled given the tags."), nil
 		}
 		hashes := c.partitioner.GetHashes(pKey, tagValues)
@@ -210,7 +211,8 @@ func performQuery(stmt string, r *http.Request, hashes []int, resolver *cluster.
 	// TODO replace allResults with a channel and make requests in parallel.
 	allResults := [][]Result{}
 	var response *http.Response
-	hashLoop: for _, hash := range hashes {
+hashLoop:
+	for _, hash := range hashes {
 		// If none of the locations for a certain hash can respond, then no Result
 		// should be returned as it would be partial. This could be configured with an allowPartialResponses parameter.
 		var err error
@@ -405,9 +407,12 @@ func (s *ResultSource) Next(fieldKey string) []float64 {
 	for i, v := range s.data[s.i].values {
 		if data, ok := v.([]interface{}); ok {
 			switch value := data[fieldIndex].(type) {
-			case int: res[i] = float64(value)
-			case float64: res[i] = value
-			case nil: res[i] = 0
+			case int:
+				res[i] = float64(value)
+			case float64:
+				res[i] = value
+			case nil:
+				res[i] = 0
 			default:
 				panic(fmt.Errorf("Unsupported type %T", value))
 			}

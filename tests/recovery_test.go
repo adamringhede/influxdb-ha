@@ -5,9 +5,10 @@ import (
 
 	influx "github.com/influxdata/influxdb/client/v2"
 
+	"time"
+
 	"github.com/adamringhede/influxdb-ha/tests/utils"
 	"github.com/stretchr/testify/assert"
-	"time"
 )
 
 // TestRecovery tests that data not written to the stopped node will then be rewritten when that node becomes alive.
@@ -39,7 +40,7 @@ func TestRecovery(t *testing.T) {
 	utils.StartNode(utils.Nodes[1])
 
 	// Wait some time for recovering to work
-	time.Sleep(time.Millisecond * 2000)
+	time.Sleep(time.Millisecond * 3000)
 
 	// It should now be recovered.
 	assertData(t, clnt2, 2)
@@ -63,11 +64,9 @@ func init() {
 	clnt1 := utils.NewClient(utils.InfluxOne)
 	clnt2 := utils.NewClient(utils.InfluxTwo)
 	clnt3 := utils.NewClient(utils.InfluxThree)
-	utils.MustQuery(clnt1, "DROP DATABASE " + utils.TestDB)
-	utils.MustQuery(clnt1, "CREATE DATABASE " + utils.TestDB)
-	utils.MustQuery(clnt2, "DROP DATABASE " + utils.TestDB)
-	utils.MustQuery(clnt2, "CREATE DATABASE " + utils.TestDB)
-	utils.MustQuery(clnt3, "DROP DATABASE " + utils.TestDB)
-	utils.MustQuery(clnt3, "CREATE DATABASE " + utils.TestDB)
+	for _, clnt := range []influx.Client{clnt1, clnt2, clnt3} {
+		utils.MustQuery(clnt, "DROP DATABASE "+utils.TestDB)
+		utils.MustQuery(clnt, "CREATE DATABASE "+utils.TestDB)
+	}
 	time.Sleep(time.Millisecond * 50)
 }

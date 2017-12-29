@@ -1,12 +1,12 @@
 package utils
 
 import (
-	"time"
-	influx "github.com/influxdata/influxdb/client/v2"
-	"github.com/adamringhede/influxdb-ha/cluster"
 	"log"
-)
+	"time"
 
+	"github.com/adamringhede/influxdb-ha/cluster"
+	influx "github.com/influxdata/influxdb/client/v2"
+)
 
 const InfluxOne = "192.168.99.100:28086"
 const InfluxTwo = "192.168.99.100:27086"
@@ -51,7 +51,7 @@ func GetPartitionKey() cluster.PartitionKey {
 	return cluster.PartitionKey{"sharded", "treasures", []string{"type"}}
 }
 
-func NewPartitioner() *cluster.Partitioner {
+func NewPartitioner() cluster.Partitioner {
 	partitioner := cluster.NewPartitioner()
 	partitioner.AddKey(GetPartitionKey())
 	return partitioner
@@ -77,9 +77,9 @@ func NewPoint(tag string, value float64) *influx.Point {
 
 func WritePoints(points []*influx.Point, clnt influx.Client) {
 	bp, err := influx.NewBatchPoints(influx.BatchPointsConfig{
-		Database: TestDB,
+		Database:        TestDB,
 		RetentionPolicy: "autogen",
-		Precision: "us",
+		Precision:       "us",
 	})
 	if err != nil {
 		log.Fatal(err)

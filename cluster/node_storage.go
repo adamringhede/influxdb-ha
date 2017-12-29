@@ -92,7 +92,9 @@ func (s *EtcdNodeStorage) Remove(name string) (bool, error) {
 	}
 	if resp.Deleted > 0 {
 		// TODO Handle failure here. If this fails, then the data may be lost.
-		s.onRemoveHandler(*node)
+		if s.onRemoveHandler != nil {
+			s.onRemoveHandler(*node)
+		}
 		return true, nil
 	}
 	return false, nil

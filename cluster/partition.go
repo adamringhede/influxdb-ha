@@ -34,6 +34,10 @@ func (c *PartitionCollection) Remove(key int) {
 	c.tree.Remove(key)
 }
 
+func (c *PartitionCollection) Clear() {
+	c.tree.Clear()
+}
+
 func (c *PartitionCollection) Get(key int) *Partition {
 	node, ok := c.findNode(key)
 	if !ok {

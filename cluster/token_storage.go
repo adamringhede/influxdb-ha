@@ -201,6 +201,7 @@ func (s *EtcdTokenStorage) InitMany(node string, numRanges int) (bool, error) {
 			return false, e
 		}
 	}
+	log.Println("Initiating tokens")
 	// we are first to initiate the cluster and no other node should ever get to this point unless we fail
 	rangeSize := maxToken / numRanges
 	for i := 0; i < numRanges; i++ {

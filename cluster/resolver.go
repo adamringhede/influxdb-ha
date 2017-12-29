@@ -1,5 +1,13 @@
 package cluster
 
+import (
+	"log"
+	"strconv"
+	"strings"
+
+	"github.com/coreos/etcd/mvcc/mvccpb"
+)
+
 const (
 	WRITE = iota
 	READ
@@ -14,19 +22,26 @@ type Resolver struct {
 	collection *PartitionCollection
 	// nodes is a set of nodes. It is managed by AddToken and RemoveToken. It should never be
 	// changed outside of those functions.
-	nodes             map[*Node]int
+	nodes             NodeCollection
 	ReplicationFactor int
 }
 
 func NewResolver() *Resolver {
-	return &Resolver{NewPartitionCollection(), make(map[*Node]int), 2}
+	return NewResolverWithNodes(NewLocalNodeCollection())
+}
+
+func NewResolverWithNodes(nodes NodeCollection) *Resolver {
+	return &Resolver{NewPartitionCollection(), nodes, 2}
 }
 
 func (r *Resolver) FindNodesByKey(key int, purpose int) []*Node {
 	partitions := r.collection.GetMultiple(key, r.ReplicationFactor)
 	nodesMap := make(map[*Node]bool)
 	for _, p := range partitions {
-		if purpose == READ && p.Node.Status == NodeStatusRecovering {
+		// Getting node from the nodes collection instead as the one in the
+		// partition may be out of date.
+		node, nodeExists := r.nodes.Get(p.Node.Name)
+		if nodeExists && purpose == READ && node.Status == NodeStatusRecovering {
 			continue
 		}
 		nodesMap[p.Node] = true
@@ -83,40 +98,102 @@ func (r *Resolver) ReverseSecondaryLookup(key int) []int {
 }
 
 func (r *Resolver) FindAllNodes() []*Node {
-	nodes := make([]*Node, len(r.nodes))
-	for node, _ := range r.nodes {
-		nodes = append(nodes, node)
+	nodes := []*Node{}
+	for _, node := range r.nodes.GetAll() {
+		nodes = append(nodes, &node)
 	}
 	return nodes
 }
 
+// FindAll returns the data locattions of all nodes in the cluster
 func (r *Resolver) FindAll() []string {
 	locations := []string{}
-	for node, _ := range r.nodes {
+	for _, node := range r.nodes.GetAll() {
 		locations = append(locations, node.DataLocation)
 	}
 	return locations
 }
 
+// RemoveAllTokens clears tll tokens. This is not thread safe.
+func (r *Resolver) RemoveAllTokens() {
+	r.collection.Clear()
+}
+
 func (r *Resolver) AddToken(token int, node *Node) {
 	p := &Partition{token, node}
 	r.collection.Put(p)
-	if _, ok := r.nodes[node]; !ok {
-		r.nodes[node] = 0
-	}
-	r.nodes[node] = r.nodes[node] + 1
 }
 
 func (r *Resolver) RemoveToken(token int) {
 	p := r.collection.Get(token)
 	if p != nil {
-		node := p.Node
 		r.collection.Remove(token)
-		if _, ok := r.nodes[node]; !ok {
-			r.nodes[node] = r.nodes[node] - 1
-			if r.nodes[node] <= 0 {
-				delete(r.nodes, node)
+	}
+}
+
+type ResolverSyncer struct {
+	resolver *Resolver
+	tokens   *EtcdTokenStorage
+	nodes    NodeCollection
+	closeCh  chan bool
+}
+
+func (r *ResolverSyncer) trackUpdates() {
+	// TODO Consider refreshing completely from the token storage with a regular interval.
+	// Note though that it would need to use a mutex lock to prevent reads.
+	for {
+		select {
+		case update := <-r.tokens.Watch():
+			for _, event := range update.Events {
+				keyParts := strings.Split(string(event.Kv.Key), "/")
+				token, err := strconv.Atoi(keyParts[len(keyParts)-1])
+				nodeName := string(event.Kv.Value)
+				if err != nil {
+					log.Printf("Failed to parse token %s", event.Kv.Key)
+					continue
+				}
+				if event.Type == mvccpb.PUT {
+					node, ok := r.nodes.Get(nodeName)
+					if ok {
+						r.resolver.AddToken(token, &node)
+					}
+				}
+				if event.Type == mvccpb.DELETE {
+					r.resolver.RemoveToken(token)
+				}
 			}
+		case <-r.closeCh:
+			return
 		}
 	}
+}
+
+func (c *ResolverSyncer) updateFromStorage() error {
+	tokens, err := c.tokens.Get()
+	if err != nil {
+		return err
+	}
+	for token, nodeName := range tokens {
+		if node, ok := c.nodes.Get(nodeName); ok {
+			c.resolver.AddToken(token, &node)
+		} else {
+			log.Fatalf("Could not find a node with name '%s'", nodeName)
+		}
+	}
+	return nil
+}
+
+func (c *ResolverSyncer) Close() {
+	close(c.closeCh)
+}
+
+// NewSyncedResolver fetches existing tokens from storage
+func NewResolverSyncer(resolver *Resolver, tokens *EtcdTokenStorage, nodes NodeCollection) (*ResolverSyncer, error) {
+	c := &ResolverSyncer{resolver: resolver, tokens: tokens, nodes: nodes, closeCh: make(chan bool)}
+	err := c.updateFromStorage()
+	if err != nil {
+		return nil, err
+	}
+	go c.trackUpdates()
+	return c, nil
 }

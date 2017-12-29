@@ -53,10 +53,8 @@ func TestReliableImporter(t *testing.T) {
 	wq.Clear()
 	// Add a task to be picked up when starting
 	wq.Push("local", ReliableImportPayload{[]int{0}})
-
-	//reliable := ReliableImporter{importer: importer, wq: wq, resolver: resolver, target: influxTwo}
 	reliable := NewReliableImporter(importer, wq, resolver, influxTwo)
-	//go reliable.Start()
+
 	workc := wq.Subscribe()
 	task1 := <-workc
 	reliable.process(task1)
@@ -69,13 +67,10 @@ func TestReliableImporter(t *testing.T) {
 
 	// Give time to allow it to import
 	time.Sleep(2000 * time.Millisecond)
-	//reliable.Stop()
 
 	results, err := fetchSimple("SELECT * FROM treasures", influxTwo, testDB)
 	assert.NoError(t, err)
 	spew.Dump(results)
 	assert.Len(t, results[0].Series[0].Values, 2)
 	assert.Equal(t, "gold", results[0].Series[0].Values[0][2].(string))
-
-	// TODO test recover from failed import
 }

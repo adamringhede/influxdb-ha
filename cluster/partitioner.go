@@ -1,10 +1,13 @@
 package cluster
 
 import (
-	"fmt"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+
 	"github.com/adamringhede/influxdb-ha/hash"
+	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/schwarmco/go-cartesian-product"
 )
 
@@ -13,12 +16,23 @@ const PartitionTagName = "_partitionToken"
 // Partitioner is used to generate numerical hash values based on a given
 // set of values and a set of partition keys. The partition keys can be
 // changed by an administrator while the server is running.
-type Partitioner struct {
+type Partitioner interface {
+	GetHashes(key PartitionKey, tags map[string][]string) []int
+	GetHash(key PartitionKey, tags map[string][]string) (int, error)
+	// FulfillsKey checks if the given values are enough for the given partition key
+	FulfillsKey(key PartitionKey, values map[string][]string) bool
+	AddKey(key PartitionKey)
+	RemoveKey(key PartitionKey)
+	GetKeyByMeasurement(db string, msmt string) (PartitionKey, bool)
+	AddKeys(keys []PartitionKey)
+}
+
+type BasicPartitioner struct {
 	partitionKeys map[string]PartitionKey
 }
 
-func NewPartitioner() *Partitioner {
-	return &Partitioner{make(map[string]PartitionKey)}
+func NewPartitioner() *BasicPartitioner {
+	return &BasicPartitioner{make(map[string]PartitionKey)}
 }
 
 func createCompoundKeys(key PartitionKey, tags map[string][]string) []string {
@@ -45,7 +59,7 @@ func createCompoundKeys(key PartitionKey, tags map[string][]string) []string {
 	return combinations
 }
 
-func (p *Partitioner) GetHashes(key PartitionKey, tags map[string][]string) []int {
+func (p *BasicPartitioner) GetHashes(key PartitionKey, tags map[string][]string) []int {
 	hashes := []int{}
 	for _, combination := range createCompoundKeys(key, tags) {
 		hashes = append(hashes, int(hash.String(combination)))
@@ -53,15 +67,15 @@ func (p *Partitioner) GetHashes(key PartitionKey, tags map[string][]string) []in
 	return hashes
 }
 
-func (p *Partitioner) GetHash(key PartitionKey, tags map[string][]string) (int, error) {
+func (p *BasicPartitioner) GetHash(key PartitionKey, tags map[string][]string) (int, error) {
 	compoundKey := []string{}
 	for _, tag := range key.Tags {
 		if values, ok := tags[tag]; ok {
 			/*
-			If there are multiple values, multiple hashes need to be returned for every possible combination.
-			This requires that the query coordinator makes the request to multiple nodes and then merges the
-			results.
-			 */
+				If there are multiple values, multiple hashes need to be returned for every possible combination.
+				This requires that the query coordinator makes the request to multiple nodes and then merges the
+				results.
+			*/
 			if len(values) > 1 {
 				return 0, errors.New("Multiple tag values for the same tag is not supported")
 			}
@@ -76,7 +90,7 @@ func (p *Partitioner) GetHash(key PartitionKey, tags map[string][]string) (int, 
 }
 
 // FulfillsKey checks if the given values are enough for the given partition key
-func (p *Partitioner) FulfillsKey(key PartitionKey, values map[string][]string) bool {
+func (p *BasicPartitioner) FulfillsKey(key PartitionKey, values map[string][]string) bool {
 	for _, tag := range key.Tags {
 		if v, ok := values[tag]; ok {
 			if len(v) == 0 || v[0] == "" {
@@ -89,26 +103,84 @@ func (p *Partitioner) FulfillsKey(key PartitionKey, values map[string][]string) 
 	return true
 }
 
-func (p *Partitioner) AddKey(key PartitionKey) {
+func (p *BasicPartitioner) AddKey(key PartitionKey) {
 	p.partitionKeys[key.Identifier()] = key
 }
 
-func (p *Partitioner) RemoveKey(key PartitionKey) {
+func (p *BasicPartitioner) RemoveKey(key PartitionKey) {
 	delete(p.partitionKeys, key.Identifier())
 }
 
-func (p *Partitioner) GetKeyByMeasurement(db string, msmt string) (PartitionKey, bool) {
-	key, ok := p.partitionKeys[db + "." + msmt]
+func (p *BasicPartitioner) GetKeyByMeasurement(db string, msmt string) (PartitionKey, bool) {
+	key, ok := p.partitionKeys[db+"."+msmt]
 	if !ok {
 		key, ok = p.partitionKeys[db]
 	}
 	return key, ok
 }
 
-func (p *Partitioner) AddKeys(keys []PartitionKey) {
+func (p *BasicPartitioner) AddKeys(keys []PartitionKey) {
 	for _, k := range keys {
 		p.AddKey(k)
 	}
+}
+
+type SyncedPartitioner struct {
+	BasicPartitioner
+	storage PartitionKeyStorage
+	closeCh chan bool
+}
+
+func (c *SyncedPartitioner) trackUpdates() {
+	for {
+		select {
+		case update := <-c.storage.Watch():
+			for _, event := range update.Events {
+				var partitionKey PartitionKey
+				err := json.Unmarshal(event.Kv.Value, &partitionKey)
+				if err != nil {
+					panic("Failed to parse partition key from update: " + string(event.Kv.Value))
+				}
+				if event.Type == mvccpb.PUT {
+					c.AddKey(partitionKey)
+				} else if event.Type == mvccpb.DELETE {
+					// Removing a partition key requires that data is re-distributed which must happen
+					// before the key is removed.
+					c.RemoveKey(partitionKey)
+				}
+			}
+		case <-c.closeCh:
+			return
+		}
+	}
+}
+
+func (c *SyncedPartitioner) updateFromStorage() error {
+	pks, err := c.storage.GetAll()
+	if err != nil {
+		return err
+	}
+	pksMap := make(map[string]PartitionKey, len(pks))
+	for _, pk := range pks {
+		pksMap[pk.Identifier()] = *pk
+	}
+	c.partitionKeys = pksMap
+	return nil
+}
+
+func (c *SyncedPartitioner) Close() {
+	close(c.closeCh)
+}
+
+// NewSyncedPartitioner fetches existing keys from storage
+func NewSyncedPartitioner(storage PartitionKeyStorage) (*SyncedPartitioner, error) {
+	c := &SyncedPartitioner{storage: storage, closeCh: make(chan bool)}
+	err := c.updateFromStorage()
+	if err != nil {
+		return nil, err
+	}
+	go c.trackUpdates()
+	return c, nil
 }
 
 type PartitionKey struct {

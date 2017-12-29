@@ -3,9 +3,6 @@ package service
 import (
 	"bytes"
 	"fmt"
-	"github.com/adamringhede/influxdb-ha/cluster"
-	"github.com/influxdata/influxdb-relay/relay"
-	"github.com/influxdata/influxdb/models"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -13,16 +10,20 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/adamringhede/influxdb-ha/cluster"
+	"github.com/influxdata/influxdb-relay/relay"
+	"github.com/influxdata/influxdb/models"
 )
 
 type WriteHandler struct {
 	client          *http.Client
 	resolver        *cluster.Resolver
-	partitioner     *cluster.Partitioner
+	partitioner     cluster.Partitioner
 	recoveryStorage cluster.RecoveryStorage
 }
 
-func NewWriteHandler(resolver *cluster.Resolver, partitioner *cluster.Partitioner, rs cluster.RecoveryStorage) *WriteHandler {
+func NewWriteHandler(resolver *cluster.Resolver, partitioner cluster.Partitioner, rs cluster.RecoveryStorage) *WriteHandler {
 	client := &http.Client{Timeout: 10 * time.Second}
 	return &WriteHandler{client, resolver, partitioner, rs}
 }
@@ -191,16 +192,16 @@ func (h *WriteHandler) relayToLocations(nodes []*cluster.Node, query string, aut
 			// An alternative to the high availability setup is to not rely on tokens at all.
 			// It would then write everything to every node.
 			//go (func() {
-				// Retry the write before putting it in recovery storage
-				//success := h.retryWrite(req)
-				//if !success {
-					// TODO figure out if it is necessary to use database and rp
-					// or if this data is already saved in each point or if we can add defaults to the points.
-					rErr := h.recoveryStorage.Put(node.Name, db, rp, buf)
-					if rErr != nil {
-						log.Printf("Recovery storage failed: %s\n", rErr.Error())
-					}
-				//}
+			// Retry the write before putting it in recovery storage
+			//success := h.retryWrite(req)
+			//if !success {
+			// TODO figure out if it is necessary to use database and rp
+			// or if this data is already saved in each point or if we can add defaults to the points.
+			rErr := h.recoveryStorage.Put(node.Name, db, rp, buf)
+			if rErr != nil {
+				log.Printf("Recovery storage failed: %s\n", rErr.Error())
+			}
+			//}
 			//})()
 			err = responseErr
 			continue
@@ -210,7 +211,7 @@ func (h *WriteHandler) relayToLocations(nodes []*cluster.Node, query string, aut
 			if rErr != nil {
 				log.Fatal(rErr)
 			}
-			err =  fmt.Errorf("Received error from InfluxDB at %s: %s", location, string(body))
+			err = fmt.Errorf("Received error from InfluxDB at %s: %s", location, string(body))
 		}
 
 	}

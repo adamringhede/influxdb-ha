@@ -176,12 +176,12 @@ func createFilename(nodeName, db, rp string) string {
 	return fmt.Sprintf("recovery_data.%s.%s.%s", nodeName, db, rp)
 }
 
-func RecoverNodes(hs *EtcdHintStorage, data RecoveryStorage, nodes map[string]*Node) {
+func RecoverNodes(hs *EtcdHintStorage, data RecoveryStorage, nodes NodeCollection) {
 	client := &http.Client{Timeout: time.Second * 2}
 	for {
 		for target := range hs.Local {
 			log.Println("Found offline node, checking for signs of life...")
-			if targetNode, ok := nodes[target]; ok {
+			if targetNode, ok := nodes.Get(target); ok {
 				if isAlive(targetNode.DataLocation, client) {
 					err := recoverNode(targetNode, data)
 					if err == nil {
@@ -195,11 +195,11 @@ func RecoverNodes(hs *EtcdHintStorage, data RecoveryStorage, nodes map[string]*N
 				log.Println("Error (recovery): The target node was not found in map of nodes")
 			}
 		}
-		time.Sleep(time.Second * 3)
+		time.Sleep(time.Second * 2)
 	}
 }
 
-func recoverNode(node *Node, data RecoveryStorage) error {
+func recoverNode(node Node, data RecoveryStorage) error {
 	ch, err := data.Get(node.Name)
 	if err != nil {
 		return fmt.Errorf("failed to recover data for node %s when reading data: %s", node.Name, err.Error())

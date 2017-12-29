@@ -7,6 +7,10 @@ import (
 	"github.com/mitchellh/mapstructure"
 )
 
+const (
+	ReliableImportWorkName = "import"
+)
+
 type RImporter interface {
 	Import(tokens []int, resolver *cluster.Resolver, target string)
 }

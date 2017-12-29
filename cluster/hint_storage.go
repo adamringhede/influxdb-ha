@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/mvcc/mvccpb"
 )
 
 type HintStatus int
@@ -24,7 +25,7 @@ type HintStorage interface {
 	Put(target string, status HintStatus) error
 	Done(target string) error
 	// GetByTarget returns the nodes that currently holds data for the node and the status of recovery
-	GetByTarget(target string) (map[string]int, error)
+	GetByTarget(target string) (map[string]HintStatus, error)
 	GetByHolder() ([]string, error)
 }
 
@@ -53,9 +54,12 @@ func (s *EtcdHintStorage) Watch() clientv3.WatchChan {
 }
 
 func (s *EtcdHintStorage) Put(target string, status HintStatus) error {
-	s.Local[target] = true
-	_, err := s.Client.Put(context.Background(), path.Join(s.path(etcdStorageHints), target, s.Holder), strconv.Itoa(int(status)))
-	return err
+	if !s.Local[target] {
+		s.Local[target] = true
+		_, err := s.Client.Put(context.Background(), path.Join(s.path(etcdStorageHints), target, s.Holder), strconv.Itoa(int(status)))
+		return err
+	}
+	return nil
 }
 
 func (s *EtcdHintStorage) Done(target string) error {
@@ -80,19 +84,50 @@ func (s *EtcdHintStorage) GetByHolder() ([]string, error) {
 	return targets, nil
 }
 
-func (s *EtcdHintStorage) GetByTarget(target string) (map[string]int, error) {
+func (s *EtcdHintStorage) GetByTarget(target string) (map[string]HintStatus, error) {
 	resp, err := s.Client.Get(context.Background(), path.Join(s.path(etcdStorageHints), target), clientv3.WithPrefix())
 	if err != nil {
 		return nil, err
 	}
-	holderMap := map[string]int{}
+	holderMap := map[string]HintStatus{}
 	for _, kv := range resp.Kvs {
 		parts := strings.Split(string(kv.Key), "/")
 		holder := parts[len(parts)-1]
 		status, err := strconv.Atoi(string(kv.Value))
 		if err == nil {
-			holderMap[holder] = status
+			holderMap[holder] = HintStatus(status)
 		}
 	}
 	return holderMap, nil
+}
+
+// WaitUntilRecovered is used to block until no more node has data that should be recovered.
+func WaitUntilRecovered(storage *EtcdHintStorage, nodeName string) chan struct{} {
+	hints, _ := storage.GetByTarget(nodeName)
+	doneCh := make(chan struct{}, 1)
+	watchCh := storage.Watch()
+watch:
+	for update := range watchCh {
+		for _, event := range update.Events {
+			parts := strings.Split(string(event.Kv.Key), "/")
+			holder := parts[len(parts)-1]
+			target := parts[len(parts)-2]
+			if event.Type == mvccpb.DELETE && target == nodeName {
+				delete(hints, holder)
+				if len(hints) == 0 {
+					doneCh <- struct{}{}
+					break watch
+				}
+			}
+		}
+	}
+	return doneCh
+}
+
+// WaitUntilRecovered is used to block until no more node has data that should be recovered.
+func WaitUntilRecoveredWithCallback(storage *EtcdHintStorage, nodeName string, cb func()) {
+	go func() {
+		<-WaitUntilRecovered(storage, nodeName)
+		cb()
+	}()
 }

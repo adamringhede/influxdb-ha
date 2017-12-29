@@ -23,6 +23,7 @@ type Task struct {
 }
 
 // WorkQueue is a way to receive work to be processed reliably.
+// TODO Seperate into WorkQueuer and Worker
 type WorkQueue interface {
 	Push(target string, payload interface{})
 	Subscribe() <-chan Task

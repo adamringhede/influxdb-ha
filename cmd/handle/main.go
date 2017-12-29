@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"log"
 	"os"
@@ -15,34 +14,7 @@ import (
 	"github.com/adamringhede/influxdb-ha/service"
 	"github.com/adamringhede/influxdb-ha/syncing"
 	"github.com/coreos/etcd/clientv3"
-	"github.com/coreos/etcd/mvcc/mvccpb"
 )
-
-type controller struct {
-	resolver *cluster.Resolver
-}
-
-func (c *controller) NotifyNewToken(token int, node *cluster.Node) {
-	c.resolver.AddToken(token, node)
-}
-
-func (c *controller) NotifyRemovedToken(token int, node *cluster.Node) {
-	c.resolver.RemoveToken(token)
-}
-
-func handleErr(err error) {
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func startImporter(etcdClient *clientv3.Client, resolver *cluster.Resolver, localNode cluster.Node) (*syncing.ReliableImporter, cluster.WorkQueue) {
-	importer := &syncing.BasicImporter{}
-	wq := cluster.NewEtcdWorkQueue(etcdClient, localNode.Name, syncing.ReliableImportWorkName)
-	reliableImporter := syncing.NewReliableImporter(importer, wq, resolver, localNode.DataLocation)
-	reliableImporter.Start()
-	return reliableImporter, wq
-}
 
 func main() {
 	bindClientAddr := flag.String("client-addr", "0.0.0.0", "IP addres for client http requests")
@@ -61,12 +33,17 @@ func main() {
 	// Maybe create a unique ID upon first time, save it on the local file system and reuse it next time.
 	nodeName, hostErr := os.Hostname()
 	handleErr(hostErr)
+
+	// Setup storage components
 	nodeStorage := cluster.NewEtcdNodeStorage(c)
 	tokenStorage := cluster.NewEtcdTokenStorageWithClient(c)
 	hintsStorage := cluster.NewEtcdHintStorage(c, nodeName)
 	settingsStorage := cluster.NewEtcdSettingsStorage(c)
 	partitionKeyStorage := cluster.NewEtcdPartitionKeyStorage(c)
 	recoveryStorage := cluster.NewLocalRecoveryStorage("./", hintsStorage)
+
+	nodeCollection, err := cluster.NewSyncedNodeCollection(nodeStorage)
+	handleErr(err)
 
 	localNode, nodeErr := nodeStorage.Get(nodeName)
 	handleErr(nodeErr)
@@ -76,63 +53,29 @@ func main() {
 		localNode.Name = nodeName
 	}
 	localNode.DataLocation = *data
+	handleErr(nodeStorage.Save(localNode))
 
 	if !isNew {
 		// Check if recovering (others nodes hold data)
-		// TODO Seperate this into something that can be tested
-		selfHints, err := hintsStorage.GetByTarget(nodeName)
+		selfHints, err := hintsStorage.GetByTarget(localNode.Name)
 		handleErr(err)
 		if len(selfHints) != 0 {
-			localNode.Status = cluster.NodeStatusRecovering
-			nodeStorage.Save(localNode)
-			go (func() {
-				hintsChan := partitionKeyStorage.Watch()
-			hintWatch:
-				for update := range hintsChan {
-					for _, event := range update.Events {
-						parts := strings.Split(string(event.Kv.Key), "/")
-						nodeName = parts[len(parts)-1]
-						if event.Type == mvccpb.DELETE && nodeName == localNode.Name {
-							localNode.Status = cluster.NodeStatusUp
-							nodeStorage.Save(localNode)
-							break hintWatch
-						}
-					}
-				}
-			})()
+			cluster.WaitUntilRecoveredWithCallback(hintsStorage, localNode.Name, func() {
+				// It may be better instead to emit an event like finishedRecovery to some
+				// thing that manages the state.
+				localNode.Status = cluster.NodeStatusUp
+				nodeStorage.Save(localNode)
+			})
 		}
 	}
-
-	// TODO launch component to start pinging other data locations for their availability
-	// for which this node is holding data.
-
-	saveErr := nodeStorage.Save(localNode)
-	handleErr(saveErr)
-
-	nodes, err := nodeStorage.GetAll()
-	handleErr(err)
-
-	tokensMap, err := tokenStorage.Get()
-	handleErr(err)
 
 	defaultReplicationFactor, err := settingsStorage.GetDefaultReplicationFactor()
 	handleErr(err)
 
-	// store nodes as a map
-	nodesMap := make(map[string]*cluster.Node, len(nodes))
-	for _, node := range nodes {
-		nodesMap[node.Name] = node
-	}
-
-	resolver := cluster.NewResolver()
+	resolver := cluster.NewResolverWithNodes(nodeCollection)
+	_, err = cluster.NewResolverSyncer(resolver, tokenStorage, nodeCollection)
+	handleErr(err)
 	resolver.ReplicationFactor = defaultReplicationFactor
-	for token, nodeName := range tokensMap {
-		if node, ok := nodesMap[nodeName]; ok {
-			resolver.AddToken(token, node)
-		} else {
-			log.Fatalf("Could not find a node with name %s", nodeName)
-		}
-	}
 
 	_, importWQ := startImporter(c, resolver, *localNode)
 
@@ -140,7 +83,7 @@ func main() {
 		// Distribute tokens to other nodes
 		nodes := []string{}
 		tokenGroups := map[string][]int{}
-		for name := range nodesMap {
+		for name := range nodeCollection.GetAll() {
 			if name != removedNode.Name {
 				if _, ok := tokenGroups[name]; !ok {
 					nodes = append(nodes, name)
@@ -166,7 +109,8 @@ func main() {
 		}
 	})
 
-	partitioner := cluster.NewPartitioner()
+	partitioner, err := cluster.NewSyncedPartitioner(partitionKeyStorage)
+	handleErr(err)
 	partitioner.AddKey(cluster.PartitionKey{
 		Database:    "sharded",
 		Measurement: "treasures",
@@ -174,89 +118,12 @@ func main() {
 	})
 
 	go (func() {
-		for update := range partitionKeyStorage.Watch() {
-			for _, event := range update.Events {
-				var partitionKey cluster.PartitionKey
-				err := json.Unmarshal(event.Kv.Value, &partitionKey)
-				if err != nil {
-					log.Println("Failed to parse partition key from update: ", string(event.Kv.Value))
-				}
-				if event.Type == mvccpb.PUT {
-					partitioner.AddKey(partitionKey)
-				} else if event.Type == mvccpb.DELETE {
-					// Removing a partition key requires that data is re-distributed which must happen
-					// before the key is removed.
-					partitioner.RemoveKey(partitionKey)
-				}
-			}
-		}
-	})()
-
-	go (func() {
 		for rf := range settingsStorage.WatchDefaultReplicationFactor() {
 			resolver.ReplicationFactor = rf
 		}
 	})()
 
-	// Watch for changes to nodes
-	go (func() {
-		for update := range nodeStorage.Watch() {
-			for _, event := range update.Events {
-				if event.Type == mvccpb.PUT {
-					var node cluster.Node
-					err := json.Unmarshal(event.Kv.Value, &node)
-					if err != nil {
-						log.Println("Failed to parse node from update: ", string(event.Kv.Value))
-					}
-					if _, ok := nodesMap[node.Name]; ok {
-						nodesMap[node.Name].Status = node.Status
-						nodesMap[node.Name].DataLocation = node.DataLocation
-					} else {
-						nodesMap[node.Name] = &node
-					}
-
-				}
-			}
-		}
-	})()
-
-	// Watch for changes to tokens and keep resolver in sync.
-	// TODO if a token is assigned to this node later on, then it needs to import data for that token
-	// from other nodes. This means that they should not be assigned, only reserved, until data is imported
-	// to adhere to the availability guarantees.
-	go (func() {
-		for update := range tokenStorage.Watch() {
-			for _, event := range update.Events {
-				keyParts := strings.Split(string(event.Kv.Key), "/")
-				token, err := strconv.Atoi(keyParts[len(keyParts)-1])
-				nodeName := string(event.Kv.Value)
-				if err != nil {
-					log.Printf("Failed to parse token %s", event.Kv.Key)
-					continue
-				}
-				if event.Type == mvccpb.PUT {
-					node, ok := nodesMap[nodeName]
-					if !ok {
-						foundNode, _ := nodeStorage.Get(nodeName)
-						if foundNode != nil {
-							nodesMap[nodeName] = foundNode
-							node = foundNode
-							ok = true
-						}
-					}
-					if ok {
-						resolver.AddToken(token, node)
-						tokensMap[token] = nodeName
-					}
-				}
-				if event.Type == mvccpb.DELETE {
-					resolver.RemoveToken(token)
-				}
-			}
-		}
-	})()
-
-	go cluster.RecoverNodes(hintsStorage, recoveryStorage, nodesMap)
+	go cluster.RecoverNodes(hintsStorage, recoveryStorage, nodeCollection)
 
 	httpConfig := service.Config{
 		BindAddr: *bindClientAddr,
@@ -264,6 +131,8 @@ func main() {
 	}
 
 	// Starting the service here so that the node can receive writes while joining.
+	// TODO Create a cluster manager component that uses all these storage components etc to not
+	// have to pass all of them along.
 	go service.Start(resolver, partitioner, recoveryStorage, partitionKeyStorage, nodeStorage, httpConfig)
 
 	if isNew {
@@ -275,7 +144,17 @@ func main() {
 			handleErr(err)
 		}
 		if !isFirstNode {
+			log.Println("Joining existing cluster")
+			// Setting the status to recovering will prevent writes.
+			localNode.Status = cluster.NodeStatusRecovering
+			nodeStorage.Save(localNode)
+
 			err = join(localNode, tokenStorage, resolver)
+			handleErr(err)
+
+			localNode.Status = cluster.NodeStatusUp
+			err = nodeStorage.Save(localNode)
+			// If this fails, the node will be stuck in the wrong state unable to receive writes
 			handleErr(err)
 		}
 		mtx.Unlock(context.Background())
@@ -404,4 +283,18 @@ func printHostname() {
 		panic(nameErr)
 	}
 	log.Printf("Hostname: %s", hostname)
+}
+
+func handleErr(err error) {
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func startImporter(etcdClient *clientv3.Client, resolver *cluster.Resolver, localNode cluster.Node) (*syncing.ReliableImporter, cluster.WorkQueue) {
+	importer := &syncing.BasicImporter{}
+	wq := cluster.NewEtcdWorkQueue(etcdClient, localNode.Name, syncing.ReliableImportWorkName)
+	reliableImporter := syncing.NewReliableImporter(importer, wq, resolver, localNode.DataLocation)
+	go reliableImporter.Start()
+	return reliableImporter, wq
 }

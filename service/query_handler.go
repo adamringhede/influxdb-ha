@@ -5,15 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/adamringhede/influxdb-ha/cluster"
-	"github.com/influxdata/influxdb/influxql"
-	"github.com/influxdata/influxdb/models"
 	"io"
 	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/adamringhede/influxdb-ha/cluster"
+	"github.com/influxdata/influxdb/influxql"
+	"github.com/influxdata/influxdb/models"
 )
 
 // Message represents a user-facing Message to be included with the Result.
@@ -112,7 +113,7 @@ func request(statement string, host string, client *http.Client, r *http.Request
 type QueryHandler struct {
 	client         *http.Client
 	resolver       *cluster.Resolver
-	partitioner    *cluster.Partitioner
+	partitioner    cluster.Partitioner
 	clusterHandler *ClusterHandler
 }
 
