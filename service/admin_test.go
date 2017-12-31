@@ -147,6 +147,10 @@ func (ns *MockedNodeStorage) Save(node *cluster.Node) error {
 	return nil
 }
 
+func (s *MockedNodeStorage) OnRemove(h func(cluster.Node)) {
+
+}
+
 func NewMockedNodeStorage() *MockedNodeStorage {
 	return &MockedNodeStorage{[]*cluster.Node{}}
 }
