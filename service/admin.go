@@ -93,7 +93,7 @@ func (h *ClusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for _, node := range nodes {
 			values = append(values, []interface{}{node.Name, node.DataLocation})
 		}
-		respondWithResults(w, createListResults("nodes", []string{"name", "location"}, values))
+		respondWithResults(w, createListResults("nodes", []string{"name", "data location"}, values))
 		return
 	default:
 		jsonError(w, http.StatusInternalServerError, "not implemented")

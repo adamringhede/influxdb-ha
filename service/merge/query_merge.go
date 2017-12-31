@@ -1,11 +1,12 @@
 package merge
 
 import (
-	"github.com/influxdata/influxdb/influxql"
-	"strings"
+	"bytes"
 	"fmt"
 	"strconv"
-	"bytes"
+	"strings"
+
+	"github.com/influxdata/influxdb/influxql"
 )
 
 type ResultSource interface {
@@ -13,7 +14,7 @@ type ResultSource interface {
 }
 
 type QueryField struct {
-	Root       	  QueryNode
+	Root          QueryNode
 	ResponseField string
 }
 
@@ -40,6 +41,8 @@ func (qb *QueryBuilder) Get(expr string) *Values {
 	return &Values{qb.Fields[expr]}
 }
 
+// CreateStatement ...
+// Implementation is taken from influxdb source.
 func (qb *QueryBuilder) CreateStatement(s *influxql.SelectStatement) string {
 	var buf bytes.Buffer
 	_, _ = buf.WriteString("SELECT ")
@@ -145,15 +148,15 @@ func createQueryNode(expr influxql.Expr, qb *QueryBuilder) (QueryNode, error) {
 			n = NewCount(f.Args[0].String(), qb)
 		default:
 			/*
-			Not supported:
-			integral, median, stddev, sample, percentile, first, last
-			as well as all transformations
+				Not supported:
+				integral, median, stddev, sample, percentile, first, last
+				as well as all transformations
 
-			First and Last can not be supported as ResultSource.Next only return values and
-			not the timestamps of those value. Need a different function than next that also
-			includes the time.
-			Remember that for "sample", the the values timestamps will be returned
-			which ´differs from the assumption that the timestamp is at the start of the group.
+				First and Last can not be supported as ResultSource.Next only return values and
+				not the timestamps of those value. Need a different function than next that also
+				includes the time.
+				Remember that for "sample", the the values timestamps will be returned
+				which ´differs from the assumption that the timestamp is at the start of the group.
 			*/
 			return nil, fmt.Errorf("InfluxQL function '%s' is not supported when merging results from multiple hosts.", f.Name)
 		}
@@ -196,7 +199,7 @@ func (n *FloatLit) Next(source ResultSource) []float64 {
 }
 
 type BinaryOp struct {
-	op influxql.Token
+	op  influxql.Token
 	lhs QueryNode
 	rhs QueryNode
 }
@@ -215,16 +218,20 @@ func (n *BinaryOp) Next(source ResultSource) []float64 {
 	}
 	var res float64
 	switch n.op {
-	case influxql.ADD: res = lhs[0] + rhs[0]
-	case influxql.SUB: res = lhs[0] - rhs[0]
-	case influxql.MUL: res = lhs[0] * rhs[0]
+	case influxql.ADD:
+		res = lhs[0] + rhs[0]
+	case influxql.SUB:
+		res = lhs[0] - rhs[0]
+	case influxql.MUL:
+		res = lhs[0] * rhs[0]
 	case influxql.DIV:
 		if rhs[0] != 0 {
 			res = lhs[0] / rhs[0]
 		} else {
 			res = 0
 		}
-	case influxql.MOD: res = float64(int(lhs[0]) % int(rhs[0]))
+	case influxql.MOD:
+		res = float64(int(lhs[0]) % int(rhs[0]))
 	}
 	return []float64{res}
 }

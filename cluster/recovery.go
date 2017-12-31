@@ -179,6 +179,8 @@ func createFilename(nodeName, db, rp string) string {
 func RecoverNodes(hs *EtcdHintStorage, data RecoveryStorage, nodes NodeCollection) {
 	client := &http.Client{Timeout: time.Second * 2}
 	for {
+		// TODO This can probably be replaced with an event handler of some sort that listens for nodes to start up.
+		// This would remove the need of the sleep. The faster the node is recovered, the faster the health of the cluster can be recovered.
 		for target := range hs.Local {
 			log.Println("Found offline node, checking for signs of life...")
 			if targetNode, ok := nodes.Get(target); ok {
@@ -187,6 +189,7 @@ func RecoverNodes(hs *EtcdHintStorage, data RecoveryStorage, nodes NodeCollectio
 					if err == nil {
 						log.Printf("Finished recovering node %s\n", target)
 						data.Drop(target)
+						hs.Done(target)
 					} else {
 						log.Println(err.Error())
 					}

@@ -17,10 +17,16 @@ import (
 )
 
 func main() {
+	hostName, hostErr := os.Hostname()
+	handleErr(hostErr)
+
 	bindClientAddr := flag.String("client-addr", "0.0.0.0", "IP addres for client http requests")
-	bindClientPort := flag.Int("client-port", 8086, "Port for http requests")
-	data := flag.String("data", ":28086", "InfluxDB database port")
-	etcdEndpoints := flag.String("etcd", "", "Comma seperated locations of etcd nodes")
+	bindClientPort := flag.Int("client-port", 80861, "Port for http requests")
+	data := flag.String("data", "localhost:8086", "InfluxDB database public host:port")
+	etcdEndpoints := flag.String("etcd", "localhost:2379", "Comma seperated locations of etcd nodes")
+	clusterID := flag.String("cluster-id", "default", "Comma seperated locations of etcd nodes")
+	_nodeName := flag.String("node-name", hostName, "A unique name of the node to use instead of the hostname")
+
 	flag.Parse()
 
 	c, etcdErr := clientv3.New(clientv3.Config{
@@ -29,10 +35,10 @@ func main() {
 	})
 	handleErr(etcdErr)
 
+	nodeName := *_nodeName
+
 	// TODO Only default to hostname, prefer using a configurable id
 	// Maybe create a unique ID upon first time, save it on the local file system and reuse it next time.
-	nodeName, hostErr := os.Hostname()
-	handleErr(hostErr)
 
 	// Setup storage components
 	nodeStorage := cluster.NewEtcdNodeStorage(c)
@@ -41,6 +47,12 @@ func main() {
 	settingsStorage := cluster.NewEtcdSettingsStorage(c)
 	partitionKeyStorage := cluster.NewEtcdPartitionKeyStorage(c)
 	recoveryStorage := cluster.NewLocalRecoveryStorage("./", hintsStorage)
+
+	nodeStorage.ClusterID = *clusterID
+	tokenStorage.ClusterID = *clusterID
+	hintsStorage.ClusterID = *clusterID
+	settingsStorage.ClusterID = *clusterID
+	partitionKeyStorage.ClusterID = *clusterID
 
 	nodeCollection, err := cluster.NewSyncedNodeCollection(nodeStorage)
 	handleErr(err)
@@ -135,6 +147,7 @@ func main() {
 	// have to pass all of them along.
 	go service.Start(resolver, partitioner, recoveryStorage, partitionKeyStorage, nodeStorage, httpConfig)
 
+	// If anythong above fails, it is no longer seen as new and the below will not execute.
 	if isNew {
 		mtx, err := tokenStorage.Lock()
 		handleErr(err)
@@ -258,23 +271,6 @@ func deleteTokensData(tokenLocations map[int]*cluster.Node) {
 		})()
 	}
 	g.Wait()
-}
-
-func createClusterHandle(clusterConfig cluster.Config, join *string) *cluster.Handle {
-	handle, err := cluster.NewHandle(clusterConfig)
-	if err != nil {
-		panic(err)
-	}
-	others := strings.Split(*join, ",")
-	if len(others) > 0 && *join != "" {
-		log.Printf("Joining: %s", *join)
-		joinErr := handle.Join(others)
-		if joinErr != nil {
-			log.Println("Failed to join any other node")
-		}
-	}
-	printHostname()
-	return handle
 }
 
 func printHostname() {

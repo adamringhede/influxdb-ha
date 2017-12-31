@@ -3,7 +3,6 @@ package cluster
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"sort"
 	"strconv"
@@ -211,7 +210,6 @@ func (s *EtcdTokenStorage) InitMany(node string, numRanges int) (bool, error) {
 			s.Client.Delete(context.Background(), initKey)
 			return false, err
 		}
-		fmt.Printf("%d, ", i*rangeSize)
 	}
 	s.Release(0)
 	return true, nil
