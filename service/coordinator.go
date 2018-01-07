@@ -27,6 +27,24 @@ type Coordinator struct {
 	partitioner cluster.Partitioner
 }
 
+type compareLess func(a, b interface{}) bool
+
+func lessRfc(a, b interface{}) bool {
+	ats, err := time.Parse(time.RFC3339Nano, a.(string))
+	if err != nil {
+		log.Panic(err)
+	}
+	bts, err := time.Parse(time.RFC3339Nano, b.(string))
+	if err != nil {
+		log.Panic(err)
+	}
+	return ats.UnixNano() < bts.UnixNano()
+}
+
+func lessFloat(a, b interface{}) bool {
+	return a.(float64) < b.(float64)
+}
+
 func groupResultsByTags(allResults [][]Result) map[string][]Result {
 	groupedResults := map[string][]Result{}
 	// Group allResults by combination of tags
@@ -59,32 +77,33 @@ func timeGreaterThan(a, b string) bool {
 	return ats.Nanosecond() > bts.Nanosecond()
 }
 
-func mergeSortResults(groupedResults map[string][]Result) []Result {
+// mergeSortResults assuems that there is only one series
+func mergeSortResults(groupedResults map[string][]Result, less compareLess) []Result {
 	mergedResults := []Result{}
 	for _, group := range groupedResults {
 		merged := Result{}
 		merged.Series = []*models.Row{{
-			Columns: []string{},
-			Values:  [][]interface{}{},
+			Columns: []string{},        // TODO make sure to set column and that they are in the same order from the results
+			Values:  [][]interface{}{}, // TODO preallocate memory for the values
 		}}
 		allDone := false
 		for !allDone {
-			min := group[0]
+			min := 0
 			allDone = true
-			for _, result := range group {
+			for i, result := range group {
 				if len(result.Series[0].Values) > 0 {
 					allDone = false
 				} else {
 					continue
 				}
-				if len(min.Series[0].Values) == 0 ||
-					!timeGreaterThan(result.Series[0].Values[0][0].(string), min.Series[0].Values[0][0].(string)) {
-					min = result
+				if len(group[min].Series[0].Values) == 0 || less(result.Series[0].Values[0][0], group[min].Series[0].Values[0][0]) {
+					min = i
 				}
 			}
-			if len(min.Series[0].Values) > 0 {
-				merged.Series[0].Values = append(merged.Series[0].Values, min.Series[0].Values[0])
-				min.Series[0].Values = min.Series[0].Values[1:]
+			println(min)
+			if len(group[min].Series[0].Values) > 0 {
+				merged.Series[0].Values = append(merged.Series[0].Values, group[min].Series[0].Values[0])
+				group[min].Series[0].Values = group[min].Series[0].Values[1:]
 			}
 		}
 		mergedResults = append(mergedResults, merged)
@@ -99,7 +118,7 @@ func mergeQueryResults(groupedResults map[string][]Result, tree *merge.QueryTree
 		src := NewResultSource(group)
 		merged := Result{}
 		merged.Series = []*models.Row{{
-			Columns: []string{"time"},
+			Columns: []string{"time"}, // TODO make sure to add the columns from the results and that they are in the same order
 			Values:  [][]interface{}{},
 		}}
 		for src.Reset(); !src.Done(); src.Step() {
@@ -162,7 +181,7 @@ func (c *Coordinator) Handle(stmt *influxql.SelectStatement, r *http.Request, db
 				return []Result{}, err, nil
 			}
 			// A selection with a call need to be handled differently as results from calls from different
-			// nodes need to be merged. However if there is not aggregation, it is enough to just merge
+			// nodes need to be merged. However if there is no aggregation, it is enough to just merge
 			// the result and maintain sort.
 			if interval == 0 && !hasCall(stmt) {
 				allResults, err, response := performQuery(stmt.String(), r, hashes, c.resolver, client)
@@ -170,7 +189,14 @@ func (c *Coordinator) Handle(stmt *influxql.SelectStatement, r *http.Request, db
 					return []Result{}, err, nil
 				}
 				groupedResults := groupResultsByTags(allResults)
-				mergedResults := mergeSortResults(groupedResults)
+				precision := r.URL.Query().Get("precision")
+				var less compareLess
+				if strings.ToLower(precision) == "rfc3339" {
+					less = lessRfc
+				} else {
+					less = lessFloat
+				}
+				mergedResults := mergeSortResults(groupedResults, less)
 				return mergedResults, nil, response
 			} else {
 				// Divide the query and merge the results

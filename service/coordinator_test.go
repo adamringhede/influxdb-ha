@@ -2,17 +2,84 @@ package service
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/adamringhede/influxdb-ha/service/merge"
 	"github.com/influxdata/influxdb/influxql"
 	"github.com/influxdata/influxdb/models"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 func Test_buildTree(t *testing.T) {
 	stmt := mustGetSelect(`SELECT top("foo", 2), mean("value") FROM sales where time < now() group by time(1h) `)
 	_, _, err := merge.NewQueryTree(stmt)
 	assert.NoError(t, err)
+}
+
+func createTestResult(dates [][]interface{}) Result {
+	return Result{Series: []*models.Row{{
+		Columns: []string{"time"},
+		Values:  dates,
+	}}}
+}
+
+func TestLessRfc(t *testing.T) {
+	examplesLess := [][]interface{}{
+		{"1970-01-01T00:00:00Z", "1971-01-01T00:00:00Z", true},
+		{"1973-01-01T00:00:00Z", "1970-03-01T00:00:00Z", false},
+	}
+
+	for _, x := range examplesLess {
+		var word string
+		if x[2].(bool) {
+			word = "less"
+		} else {
+			word = "more"
+		}
+		assert.Equal(t, x[2].(bool), lessRfc(x[0].(string), x[1].(string)), fmt.Sprintf("%s should be %s than %s", x[0].(string), word, x[1].(string)))
+	}
+}
+
+func TestMergeSortRfcDates(t *testing.T) {
+
+	rfcDates1 := [][]interface{}{
+		{"1970-01-01T00:00:00Z"},
+		{"1971-01-01T00:00:00Z"},
+		{"1973-01-01T00:00:00Z"},
+	}
+
+	rfcDates2 := [][]interface{}{
+		{"1970-02-01T00:00:00Z"},
+		{"1970-03-01T00:00:00Z"},
+		{"1972-01-01T00:00:00Z"},
+	}
+
+	expected := [][]interface{}{
+		{"1970-01-01T00:00:00Z"},
+		{"1970-02-01T00:00:00Z"},
+		{"1970-03-01T00:00:00Z"},
+		{"1971-01-01T00:00:00Z"},
+		{"1972-01-01T00:00:00Z"},
+		{"1973-01-01T00:00:00Z"},
+	}
+
+	sortedResults := mergeSortResults(map[string][]Result{
+		"": {createTestResult(rfcDates1), createTestResult(rfcDates2)},
+	}, lessRfc)[0]
+
+	assert.Equal(t, expected, sortedResults.Series[0].Values)
+}
+
+func TestMergeSortIntDates(t *testing.T) {
+	timeDates1 := [][]interface{}{{0.}, {3.}, {10.}}
+	timeDates2 := [][]interface{}{{0.}, {1.}, {4.}}
+	expected := [][]interface{}{{0.}, {0.}, {1.}, {3.}, {4.}, {10.}}
+
+	sortedResults := mergeSortResults(map[string][]Result{
+		"": {createTestResult(timeDates1), createTestResult(timeDates2)},
+	}, lessFloat)[0]
+
+	assert.Equal(t, expected, sortedResults.Series[0].Values)
 }
 
 func Test_mergeResults(t *testing.T) {
@@ -80,10 +147,9 @@ func getSelectStatements(statements influxql.Statements) (result []*influxql.Sel
 	return result
 }
 
-
 /*
 TODO Testing
 Need two or three instances,
 Test when an instance is unreachable (the randomness need to be seeded)
 	For instance, the resolver should be able to select one and it should have a parameter for a seed.
- */
+*/
