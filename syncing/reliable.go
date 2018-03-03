@@ -4,7 +4,6 @@ import (
 	"log"
 
 	"github.com/adamringhede/influxdb-ha/cluster"
-	"github.com/mitchellh/mapstructure"
 )
 
 const (
@@ -15,6 +14,9 @@ type RImporter interface {
 	Import(tokens []int, resolver *cluster.Resolver, target string)
 }
 
+// TODO consider maybe including the measurements if we have this information to start with.
+// We need a way to keep track of measurements imported that does not have a partition key.
+// Or if they do not have a partition key, we will import them first or last according to the checkpoint
 type ReliableImportPayload struct {
 	Tokens []int `json:"Tokens"`
 }
@@ -23,6 +25,12 @@ type ReliableImportCheckpoint struct {
 	// TokenIndex is the last index processed
 	TokenIndex int
 }
+type ReliableImportTask struct {
+	ID string
+	Checkpoint ReliableImportCheckpoint
+	Payload ReliableImportCheckpoint
+}
+
 
 type ReliableImporter struct {
 	importer RImporter
@@ -41,7 +49,10 @@ func (imp *ReliableImporter) Start() {
 	for {
 		select {
 		case task := <-tasks:
-			imp.process(task)
+			var checkpoint ReliableImportCheckpoint
+			var payload ReliableImportPayload
+			task.Unmarshal(&payload, &checkpoint)
+			imp.process(task.ID, payload, checkpoint)
 		case <-imp.stopChan:
 			return
 		}
@@ -53,34 +64,25 @@ func (imp *ReliableImporter) Stop() {
 	close(imp.stopChan)
 }
 
-func reconstructPayload(data interface{}) ReliableImportPayload {
-	var p ReliableImportPayload
-	mapstructure.Decode(data, &p)
-	return p
-}
+func (imp *ReliableImporter) process(taskID string, payload ReliableImportPayload, checkpoint ReliableImportCheckpoint) {
+	lastIndex := checkpoint.TokenIndex
+	log.Printf("Processing task: %s", taskID)
 
-func reconstructCheckpoint(data interface{}) ReliableImportCheckpoint {
-	var c ReliableImportCheckpoint
-	mapstructure.Decode(data, &c)
-	return c
-}
-
-func (imp *ReliableImporter) process(task cluster.Task) {
-	lastIndex := -1
-	log.Printf("Processing task: %s", task.ID)
-
-	if task.Checkpoint != nil {
-		checkpoint := reconstructCheckpoint(task.Checkpoint)
-		lastIndex = checkpoint.TokenIndex
-	}
-
-	payload := reconstructPayload(task.Payload)
-	for i, token := range payload.Tokens[lastIndex+1:] {
+	task := cluster.Task{}
+	task.ID = taskID
+	task.Payload = payload
+	for i, token := range payload.Tokens[lastIndex:] {
 		// TODO Do not checkin after every single token.
 		// Instead figure out the maximum size of each token, and checkin based on the amount
 		// of data processed.
+		// TODO importing for a single token is inefficent as each import has some overhead.
+		// TODO Consider having the importer implement a mini batch iterator
+		// TODO handle failure to import by trying again later. This depends on the error of course and should only try again later if the error is recoverable.
+
+		// maybe instead of just using tokens, the importer also can take an option of a batch size which could be in terms of series or points imported.
+		// also, it could be a good idea to distribute databases (not measurements as some queries need them to be one the same node)
 		imp.importer.Import([]int{token}, imp.resolver, imp.target)
-		task.Checkpoint = ReliableImportCheckpoint{TokenIndex: i}
+		task.Checkpoint = ReliableImportCheckpoint{TokenIndex: i+1}
 		imp.wq.CheckIn(task)
 	}
 	imp.wq.Complete(task)

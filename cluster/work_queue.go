@@ -22,30 +22,58 @@ type Task struct {
 	Payload interface{} `json:"Payload"`
 }
 
-// WorkQueue is a way to receive work to be processed reliably.
-// TODO Seperate into WorkQueuer and Worker
-type WorkQueue interface {
-	Push(target string, payload interface{})
-	Subscribe() <-chan Task
+// Task data is used to deserialize tasks added to the queue
+type TaskData struct {
+	ID string `json:"ID"`
+	Checkpoint json.RawMessage `json:"Checkpoint"`
+	Payload json.RawMessage `json:"Payload"`
+}
+
+func (task *TaskData) Unmarshal(payload interface{}, checkpoint interface{}) (err error) {
+	if task.Payload != nil {
+		err = json.Unmarshal(task.Payload, &payload)
+	}
+	if err == nil && task.Checkpoint != nil {
+		err = json.Unmarshal(task.Checkpoint, &checkpoint)
+	}
+	return err
+}
+
+type WorkSubscriber interface {
+	Subscribe() <-chan TaskData
 	Unsubscribe()
 	CheckIn(task Task)
-	Drop(task Task)
 	Complete(task Task)
+}
+
+type WorkPublisher interface {
+	Push(target string, payload interface{})
+	Drop(task Task)
+}
+
+// WorkQueue is a way to receive work to be processed reliably.
+type WorkQueue interface {
+	WorkPublisher
+	WorkSubscriber
 }
 
 type MockedWorkQueue struct {
 	busy  bool
-	tasks chan Task
+	tasks chan TaskData
 }
 
 func (wq *MockedWorkQueue) Push(target string, payload interface{}) {
 	if wq.tasks == nil {
-		wq.tasks = make(chan Task, 128)
+		wq.tasks = make(chan TaskData, 128)
 	}
-	wq.tasks <- Task{Payload: payload}
+	task := Task{Payload: payload}
+	taskRaw, _ := json.Marshal(task)
+	var taskData TaskData
+	json.Unmarshal(taskRaw, &taskData)
+	wq.tasks <- taskData
 }
 
-func (wq *MockedWorkQueue) Subscribe() chan Task {
+func (wq *MockedWorkQueue) Subscribe() chan TaskData {
 	return wq.tasks
 }
 
@@ -69,6 +97,7 @@ type EtcdWorkQueue struct {
 	Type     string
 	busy     bool
 	stopChan chan bool
+	mtx		*concurrency.Mutex
 }
 
 func NewEtcdWorkQueue(c *clientv3.Client, target, workType string) *EtcdWorkQueue {
@@ -92,7 +121,18 @@ func (wq *EtcdWorkQueue) lock() error {
 		return err
 	}
 	mtx := concurrency.NewMutex(session, wq.path("tasks/lock/"+wq.Target))
-	return mtx.Lock(context.Background())
+	err = mtx.Lock(context.Background())
+	if err != nil {
+		return err
+	}
+	wq.mtx = mtx
+	return nil
+}
+
+func (wq *EtcdWorkQueue) unlock() {
+	if wq.mtx != nil {
+		wq.mtx.Unlock(context.Background())
+	}
 }
 
 func (wq *EtcdWorkQueue) targetPath(target string) string {
@@ -105,14 +145,14 @@ func (wq *EtcdWorkQueue) targetPathId(target, id string) string {
 
 // Subscribe listens for updates to the pending folder to emit new tasks.
 // It is built on the assumption that only one client will be looking for tasks on the same queue.
-func (wq *EtcdWorkQueue) Subscribe() <-chan Task {
+func (wq *EtcdWorkQueue) Subscribe() <-chan TaskData {
 	if wq.busy {
 		panic("Only one subscriber per queue")
 	}
 	wq.busy = true
 	wq.lock()
 
-	tasks := make(chan Task, 1028)
+	tasks := make(chan TaskData, 1028)
 
 	// Retrieve all existing tasks
 	resp, err := wq.Client.Get(context.Background(), wq.targetPath(wq.Target), clientv3.WithPrefix())
@@ -135,6 +175,7 @@ func (wq *EtcdWorkQueue) Subscribe() <-chan Task {
 					}
 				}
 			case <-wq.stopChan:
+				wq.unlock()
 				return
 			}
 		}
@@ -147,8 +188,8 @@ func (wq *EtcdWorkQueue) Clear() error {
 	return err
 }
 
-func (wq *EtcdWorkQueue) unmarshal(data []byte) Task {
-	var task Task
+func (wq *EtcdWorkQueue) unmarshal(data []byte) TaskData {
+	var task TaskData
 	err := json.Unmarshal(data, &task)
 	if err != nil {
 		panic(err)

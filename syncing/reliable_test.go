@@ -6,7 +6,6 @@ import (
 
 	"github.com/adamringhede/influxdb-ha/cluster"
 	"github.com/coreos/etcd/clientv3"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -57,20 +56,29 @@ func TestReliableImporter(t *testing.T) {
 
 	workc := wq.Subscribe()
 	task1 := <-workc
-	reliable.process(task1)
+
+	var payload ReliableImportPayload
+	var checkpoint ReliableImportCheckpoint
+	task1.Unmarshal(&payload, &checkpoint)
+
+	reliable.process(task1.ID, payload, checkpoint)
 
 	// Add task when running
 	wq.Push("local", ReliableImportPayload{[]int{100}})
 
 	task2 := <-workc
-	reliable.process(task2)
+
+	var payload2 ReliableImportPayload
+	var checkpoint2 ReliableImportCheckpoint
+	task2.Unmarshal(&payload2, &checkpoint2)
+
+	reliable.process(task2.ID, payload2, checkpoint2)
 
 	// Give time to allow it to import
-	time.Sleep(2000 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	results, err := fetchSimple("SELECT * FROM treasures", influxTwo, testDB)
 	assert.NoError(t, err)
-	spew.Dump(results)
 	assert.Len(t, results[0].Series[0].Values, 2)
 	assert.Equal(t, "gold", results[0].Series[0].Values[0][2].(string))
 }
