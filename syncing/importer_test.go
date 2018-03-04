@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/adamringhede/influxdb-ha/cluster"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -59,12 +58,13 @@ func TestImporter(t *testing.T) {
 		"treasures,type=silver," + cluster.PartitionTagName + "=100 value=4",
 	})
 
-	importer := &BasicImporter{}
+	importer := &BasicImporter{Predicate: func(_, _ string) ImportDecision {
+		return PartitionImport
+	}}
 	importer.Import([]int{0}, resolver, influxTwo)
 
 	results, err := fetchSimple("SELECT * FROM treasures", influxTwo, testDB)
 	assert.NoError(t, err)
-	spew.Dump(results)
 	assert.Len(t, results[0].Series[0].Values, 1)
 	assert.Equal(t, "gold", results[0].Series[0].Values[0][2].(string))
 

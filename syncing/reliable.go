@@ -10,37 +10,30 @@ const (
 	ReliableImportWorkName = "import"
 )
 
-type RImporter interface {
-	Import(tokens []int, resolver *cluster.Resolver, target string)
-}
 
 // TODO consider maybe including the measurements if we have this information to start with.
 // We need a way to keep track of measurements imported that does not have a partition key.
 // Or if they do not have a partition key, we will import them first or last according to the checkpoint
 type ReliableImportPayload struct {
-	Tokens []int `json:"Tokens"`
+	Tokens         []int `json:"Tokens"`
+	NonPartitioned bool
 }
 
 type ReliableImportCheckpoint struct {
 	// TokenIndex is the last index processed
-	TokenIndex int
+	TokenIndex     int
+	NonPartitioned bool
 }
-type ReliableImportTask struct {
-	ID string
-	Checkpoint ReliableImportCheckpoint
-	Payload ReliableImportCheckpoint
-}
-
 
 type ReliableImporter struct {
-	importer RImporter
+	importer Importer
 	wq       cluster.WorkQueue
 	resolver *cluster.Resolver
 	target   string
 	stopChan chan bool
 }
 
-func NewReliableImporter(importer RImporter, wq cluster.WorkQueue, resolver *cluster.Resolver, target string) *ReliableImporter {
+func NewReliableImporter(importer Importer, wq cluster.WorkQueue, resolver *cluster.Resolver, target string) *ReliableImporter {
 	return &ReliableImporter{importer, wq, resolver, target, make(chan bool)}
 }
 
@@ -71,6 +64,14 @@ func (imp *ReliableImporter) process(taskID string, payload ReliableImportPayloa
 	task := cluster.Task{}
 	task.ID = taskID
 	task.Payload = payload
+
+	if payload.NonPartitioned {
+		imp.importer.ImportNonPartitioned(imp.resolver, imp.target)
+
+		task.Checkpoint = checkpoint
+		imp.wq.CheckIn(task)
+	}
+
 	for i, token := range payload.Tokens[lastIndex:] {
 		// TODO Do not checkin after every single token.
 		// Instead figure out the maximum size of each token, and checkin based on the amount
@@ -82,7 +83,8 @@ func (imp *ReliableImporter) process(taskID string, payload ReliableImportPayloa
 		// maybe instead of just using tokens, the importer also can take an option of a batch size which could be in terms of series or points imported.
 		// also, it could be a good idea to distribute databases (not measurements as some queries need them to be one the same node)
 		imp.importer.Import([]int{token}, imp.resolver, imp.target)
-		task.Checkpoint = ReliableImportCheckpoint{TokenIndex: i+1}
+		checkpoint.TokenIndex = i + 1
+		task.Checkpoint = checkpoint
 		imp.wq.CheckIn(task)
 	}
 	imp.wq.Complete(task)

@@ -30,7 +30,7 @@ func TestEtcdTokenStorage_SuggestReservations(t *testing.T) {
 	assert.NoError(t, err)
 	suggestions, err := storage.SuggestReservations()
 	assert.NoError(t, err)
-	print(suggestions)
+	assert.Len(t, suggestions, 8)
 }
 
 func TestEtcdTokenStorage_Init(t *testing.T) {

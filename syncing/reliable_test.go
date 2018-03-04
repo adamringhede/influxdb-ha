@@ -46,12 +46,14 @@ func setUpReliableTest() (*clientv3.Client, *cluster.Resolver) {
 func TestReliableImporter(t *testing.T) {
 	etcdClient, resolver := setUpReliableTest()
 
-	importer := &BasicImporter{}
+	importer := &BasicImporter{Predicate: func(db, msmt string) ImportDecision {
+		return PartitionImport
+	}}
 
 	wq := cluster.NewEtcdWorkQueue(etcdClient, "local", "import")
 	wq.Clear()
 	// Add a task to be picked up when starting
-	wq.Push("local", ReliableImportPayload{[]int{0}})
+	wq.Push("local", ReliableImportPayload{Tokens: []int{0}})
 	reliable := NewReliableImporter(importer, wq, resolver, influxTwo)
 
 	workc := wq.Subscribe()
@@ -64,7 +66,7 @@ func TestReliableImporter(t *testing.T) {
 	reliable.process(task1.ID, payload, checkpoint)
 
 	// Add task when running
-	wq.Push("local", ReliableImportPayload{[]int{100}})
+	wq.Push("local", ReliableImportPayload{Tokens: []int{100}})
 
 	task2 := <-workc
 

@@ -14,99 +14,170 @@ import (
 	"time"
 
 	"github.com/adamringhede/influxdb-ha/cluster"
+	"github.com/adamringhede/influxdb-ha/hash"
 	"github.com/influxdata/influxdb/models"
 )
 
 type Loader interface {
-	get(q string, location string, db string, chunked bool)
+	get(q string, location, db, rp string, chunked bool)
 }
 
 // TODO implement a test loader that just returns json
 
-// TODO create an integration test that actually uses multiple influxdb databses and imports data from them.
+type ImportBatch struct {
+	// index can be used as an offset to continue importing from it.
+	index int
+}
+
 type Importer interface {
-	// IsActive checks if the node is in progress of importing data
-	IsActive() bool
-	// Resume importing data
-	Resume()
-	// Import imports data for a set of nodes
-	Import(tokens []int, resolver cluster.Resolver, target string)
+	Import(tokens []int, resolver *cluster.Resolver, target string)
+	ImportNonPartitioned(resolver *cluster.Resolver, target string)
+}
+
+type ErrorNoNodeFound struct{ Token int }
+
+func (err ErrorNoNodeFound) Error() string {
+	return fmt.Sprintf("No node could be found for token %d", err.Token)
+}
+
+type ImportDecision int
+
+const (
+	NoImport ImportDecision = iota
+	PartitionImport
+	FullImport
+)
+
+// ImportPredicate isolates the logic for determining if data should be imported and makes it possible
+// to later change the behaviour of the import
+type ImportDecisionTester func(db, msmt string) ImportDecision
+
+type ClusterImportPredicate struct {
+	localNode     cluster.Node
+	partitionKeys []cluster.PartitionKey
+	resolver      *cluster.Resolver
+}
+
+// Test returns true if data should be imported for a given database and measurement.
+// - test that the measurement has a partitionKey (otherwise it should not be imported by default)
+// - test that the database hash resolves to the node given the configured replication factor
+// The reason for hashing on database and not measurement is so that queries including multiple measurements
+// don't need to be distributed.
+func (p *ClusterImportPredicate) Test(db, msmt string) ImportDecision {
+	for _, pk := range p.partitionKeys {
+		if pk.Database == db && (pk.Measurement == msmt || pk.Measurement == "") {
+			return PartitionImport
+		}
+	}
+	key := hash.String(cluster.CreatePartitionKeyIdentifier(db, ""))
+	nodes := p.resolver.FindNodesByKey(int(key), cluster.WRITE)
+	for _, node := range nodes {
+		if node.Name == p.localNode.Name {
+			return FullImport
+		}
+	}
+	return NoImport
 }
 
 type BasicImporter struct {
-	loader Loader
+	loader    Loader
+	Predicate ImportDecisionTester
+
+	// cache
+	createdDatabases  map[string]bool
+	locationsMeta map[string]locationMeta
 }
 
-type httpLoader struct {
-}
 
-func (l *httpLoader) fetch(q, location, db string, chunked bool) {
-
-}
-
-func (l *httpLoader) stream(q, location, db string, chunked bool) {
-
+func (i *BasicImporter) ImportNonPartitioned(resolver *cluster.Resolver, target string) {
+	for _, location := range resolver.FindAll() {
+		i.forEachDatabase(location, target, func(db string, dbMeta *databaseMeta) {
+			for _, msmt := range dbMeta.measurements {
+				if importType := i.Predicate(db, msmt); importType == FullImport {
+					for _, rp := range dbMeta.rps {
+						importCh, _ := streamData(location, db, rp, msmt, "")
+						persistStream(importCh, dbMeta, target, db, rp)
+					}
+				}
+			}
+		})
+	}
 }
 
 // Import data given a set of tokens. The tokens should include those stolen from
 // other nodes as well as token for which this node is holding replicated data
 func (i *BasicImporter) Import(tokens []int, resolver *cluster.Resolver, target string) {
-	// TODO import and create retention policies and users.
-	// we may want to save retention policies and users in ETCD as a single source of truth.
-	// we can also keep a backlog of items for each node that could not succeed in an update
-	//	in that way the node can update its current state incrementally.
-	//	another way to to just keep one log forever and have each node keep an index to it.
-	//	once in a while an algorithm need to run to make sure its node is up to date.
-	createdDatabases := map[string]bool{}
-	// For each token resolve nodes
-	// Read data from each node and write to local storage.
-	locationsMeta := map[string]locationMeta{}
 	for _, token := range tokens {
 		nodes := resolver.FindByKey(token, cluster.READ)
-		// select first node, if it fails, try the next.
-		// use an exponential fallback if it continues to fail.
-		// at some point though we need to either give up on that token
-		// or cancel the import process.
 		for _, location := range nodes {
-			log.Printf("Starting to import for token %d from %s", token, location)
-			meta, ok := locationsMeta[location]
-			if !ok {
-				fetchedMeta, err := fetchLocationMeta(location)
-				if err != nil {
-					log.Printf("Failed fetching meta from location %s. Error: %s", location, err.Error())
-					continue
-				}
-				meta = fetchedMeta
-				locationsMeta[location] = meta
-			}
-			for db, dbMeta := range meta.databases {
-				if _, hasDB := createdDatabases[db]; !hasDB {
-					createDatabase(db, target)
-					createdDatabases[db] = true
-				}
+			i.forEachDatabase(location, target, func(db string, dbMeta *databaseMeta) {
 				i.importTokenData(location, target, token, db, dbMeta)
-			}
-			break
+			})
 		}
 	}
 	log.Println("Finished import")
 }
 
+func (i *BasicImporter) ensureCache() {
+	if i.createdDatabases == nil {
+		i.createdDatabases = map[string]bool{}
+	}
+	if i.locationsMeta == nil {
+		i.locationsMeta = map[string]locationMeta{}
+	}
+}
+
+func (i *BasicImporter) forEachDatabase(location string, target string, fn func (db string, dbMeta *databaseMeta)) {
+	i.ensureCache()
+	meta, ok := i.locationsMeta[location]
+	if !ok {
+		fetchedMeta, err := fetchLocationMeta(location)
+		if err != nil {
+			log.Printf("Failed fetching meta from location %s. Error: %s", location, err.Error())
+			return
+		}
+		meta = fetchedMeta
+		i.locationsMeta[location] = meta
+	}
+	for db, dbMeta := range meta.databases {
+		if _, hasDB := i.createdDatabases[db]; !hasDB {
+			createDatabase(db, target)
+			i.createdDatabases[db] = true
+		}
+		fn(db, dbMeta)
+	}
+}
+
 func (i *BasicImporter) importTokenData(location, target string, token int, db string, dbMeta *databaseMeta) {
 	for _, rp := range dbMeta.rps {
 		log.Printf("Exporting data from database %s.%s", db, rp)
-		importCh, _ := fetchTokenData(token, location, db, rp, strings.Join(dbMeta.measurements, ","))
-		for res := range importCh {
-			lines := []string{}
-			for _, row := range res.Series {
-				lines = append(lines, parseLines(row, dbMeta.tagKeys)...)
+
+		// TODO Do not rely on partition tag for the import
+		// Instead, get the partition keys for all measurements that exist on this node.
+		// Then request all tag values for these partition keys. Create all possible combinations of these tags and find those that
+		// would resolve to the token.
+		// The query below shows how we can serch for series for the partition key
+		// SHOW TAG VALUES ON "db" WITH KEY IN ("location","randtag")
+		for _, msmt := range dbMeta.measurements {
+			if importType := i.Predicate(db, msmt); importType == PartitionImport {
+				importCh, _ := fetchTokenData(token, location, db, rp, msmt)
+				persistStream(importCh, dbMeta, target, db, rp)
 			}
-			_, err := postLines(target, db, rp, lines)
-			if err != nil {
-				// TODO handle any type of failure to write locally.
-				// TODO find a better way to structure this to handle errors instead of panic.
-				log.Panic("Failed to post data to local node.")
-			}
+		}
+	}
+}
+
+func persistStream(importCh chan result, dbMeta *databaseMeta, target, db, rp string) {
+	for res := range importCh {
+		var lines []string
+		for _, row := range res.Series {
+			lines = append(lines, parseLines(row, dbMeta.tagKeys)...)
+		}
+		_, err := postLines(target, db, rp, lines)
+		if err != nil {
+			// TODO handle any type of failure to write locally.
+			// TODO find a better way to structure this to handle errors instead of panic.
+			log.Panicf("Failed to post data to target node %s.", target)
 		}
 	}
 }
@@ -326,10 +397,16 @@ func fetchSimple(q, location, db string) ([]result, error) {
 
 func fetchTokenData(token int, location, db, rp string, measurement string) (chan result, error) {
 	// TODO limit data retrieved. Also consider allowign checkpointing with smaller amount of data.
-	resp, err := get(
-		`SELECT * FROM `+rp+"."+measurement+` WHERE `+cluster.PartitionTagName+` = '`+strconv.Itoa(token)+`'`,
-		location,
-		db, true)
+	// TODO it should only filter on partition if the measurement has a corresponding partition key.
+	return streamData(location, db, rp, measurement, cluster.PartitionTagName+` = '`+strconv.Itoa(token)+`'`)
+}
+
+func streamData(location, db, rp string, measurement string, where string) (chan result, error) {
+	var stmt = `SELECT * FROM ` + rp + "." + measurement
+	if where != "" {
+		stmt += ` WHERE ` + where
+	}
+	resp, err := get(stmt, location, db, true)
 	if err != nil {
 		return nil, err
 	}
