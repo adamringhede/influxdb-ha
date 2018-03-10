@@ -69,7 +69,7 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// TODO add support for multiple
-			numericHash, hashErr := h.partitioner.GetHash(key, values)
+			numericHash, hashErr := cluster.GetHash(key, values)
 			if hashErr != nil {
 				jsonError(w, http.StatusInternalServerError, "failed to partition write")
 				return
@@ -77,13 +77,6 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if _, ok := pointGroups[numericHash]; !ok {
 				pointGroups[numericHash] = []models.Point{}
 			}
-			// Add the partition token resolved from the hash. This is needed when adding or removing nodes to find data
-			// to import for reassigned tokens.
-			partition := h.resolver.GetPartition(numericHash)
-			if partition == nil {
-				log.Panicf("Could not find partition for key %d. Something is wrong with the resolver.", numericHash)
-			}
-			point.AddTag(cluster.PartitionTagName, strconv.Itoa(partition.Token))
 			pointGroups[numericHash] = append(pointGroups[numericHash], point)
 		} else {
 			broadcastGroup = append(broadcastGroup, point)

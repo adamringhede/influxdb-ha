@@ -52,10 +52,22 @@ const (
 // to later change the behaviour of the import
 type ImportDecisionTester func(db, msmt string) ImportDecision
 
+func AlwaysFullImport(db, msmt string) ImportDecision {
+	return FullImport
+}
+
+func AlwaysNoImport(db, msmt string) ImportDecision {
+	return NoImport
+}
+
+func AlwaysPartitionImport(db, msmt string) ImportDecision {
+	return PartitionImport
+}
+
 type ClusterImportPredicate struct {
-	localNode     cluster.Node
-	partitionKeys []cluster.PartitionKey
-	resolver      *cluster.Resolver
+	LocalNode     cluster.Node
+	PartitionKeys cluster.PartitionKeyCollection
+	Resolver      *cluster.Resolver
 }
 
 // Test returns true if data should be imported for a given database and measurement.
@@ -64,15 +76,15 @@ type ClusterImportPredicate struct {
 // The reason for hashing on database and not measurement is so that queries including multiple measurements
 // don't need to be distributed.
 func (p *ClusterImportPredicate) Test(db, msmt string) ImportDecision {
-	for _, pk := range p.partitionKeys {
+	for _, pk := range p.PartitionKeys.GetPartitionKeys() {
 		if pk.Database == db && (pk.Measurement == msmt || pk.Measurement == "") {
 			return PartitionImport
 		}
 	}
 	key := hash.String(cluster.CreatePartitionKeyIdentifier(db, ""))
-	nodes := p.resolver.FindNodesByKey(int(key), cluster.WRITE)
+	nodes := p.Resolver.FindNodesByKey(int(key), cluster.WRITE)
 	for _, node := range nodes {
-		if node.Name == p.localNode.Name {
+		if node.Name == p.LocalNode.Name {
 			return FullImport
 		}
 	}
@@ -82,12 +94,18 @@ func (p *ClusterImportPredicate) Test(db, msmt string) ImportDecision {
 type BasicImporter struct {
 	loader    Loader
 	Predicate ImportDecisionTester
+	PartitionKeys cluster.PartitionKeyCollection
+	Resolver      *cluster.Resolver
 
 	// cache
 	createdDatabases  map[string]bool
 	locationsMeta map[string]locationMeta
 }
 
+
+func NewImporter (resolver *cluster.Resolver, partitionKeys cluster.PartitionKeyCollection, predicate ImportDecisionTester) *BasicImporter {
+	return &BasicImporter{Predicate: predicate, Resolver: resolver, PartitionKeys: partitionKeys}
+}
 
 func (i *BasicImporter) ImportNonPartitioned(resolver *cluster.Resolver, target string) {
 	for _, location := range resolver.FindAll() {
@@ -111,7 +129,7 @@ func (i *BasicImporter) Import(tokens []int, resolver *cluster.Resolver, target 
 		nodes := resolver.FindByKey(token, cluster.READ)
 		for _, location := range nodes {
 			i.forEachDatabase(location, target, func(db string, dbMeta *databaseMeta) {
-				i.importTokenData(location, target, token, db, dbMeta)
+				i.importTokenData(location, target, token, db, dbMeta, resolver)
 			})
 		}
 	}
@@ -148,7 +166,7 @@ func (i *BasicImporter) forEachDatabase(location string, target string, fn func 
 	}
 }
 
-func (i *BasicImporter) importTokenData(location, target string, token int, db string, dbMeta *databaseMeta) {
+func (i *BasicImporter) importTokenData(location, target string, token int, db string, dbMeta *databaseMeta, resolver *cluster.Resolver) {
 	for _, rp := range dbMeta.rps {
 		log.Printf("Exporting data from database %s.%s", db, rp)
 
@@ -157,11 +175,16 @@ func (i *BasicImporter) importTokenData(location, target string, token int, db s
 		// Then request all tag values for these partition keys. Create all possible combinations of these tags and find those that
 		// would resolve to the token.
 		// The query below shows how we can serch for series for the partition key
-		// SHOW TAG VALUES ON "db" WITH KEY IN ("location","randtag")
 		for _, msmt := range dbMeta.measurements {
 			if importType := i.Predicate(db, msmt); importType == PartitionImport {
-				importCh, _ := fetchTokenData(token, location, db, rp, msmt)
-				persistStream(importCh, dbMeta, target, db, rp)
+				for _, series := range dbMeta.series {
+					for _, pk := range i.PartitionKeys.GetPartitionKeys() {
+						if pk.Measurement == msmt && series.Matches(token, pk, resolver) {
+							importCh, _ := streamData(location, db, rp, msmt, series.Where())
+							persistStream(importCh, dbMeta, target, db, rp)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -298,6 +321,11 @@ func fetchLocationMeta(location string) (locationMeta, error) {
 			return meta, err
 		}
 		dbMeta.tagKeys = tagKeys
+		series, err := FetchSeries(location, db)
+		if err != nil {
+			return meta, err
+		}
+		dbMeta.series = series
 	}
 	return meta, nil
 }
@@ -314,10 +342,11 @@ type databaseMeta struct {
 	measurements []string
 	rps          []string
 	tagKeys      map[string]bool
+	series 		 []Series
 }
 
 func newDatabaseMeta() *databaseMeta {
-	return &databaseMeta{[]string{}, []string{}, map[string]bool{}}
+	return &databaseMeta{[]string{}, []string{}, map[string]bool{}, []Series{}}
 }
 
 func get(q string, location string, db string, chunked bool) (*http.Response, error) {
@@ -328,7 +357,21 @@ func get(q string, location string, db string, chunked bool) (*http.Response, er
 		log.Panic(err)
 	}
 	encoded := values.Encode()
-	return client.Get("http://" + location + "/query?" + encoded)
+	return getWithRetry(client, "http://" + location + "/query?" + encoded, 5)
+}
+
+func getWithRetry(client *http.Client, url string, attempts int) (*http.Response, error) {
+	if attempts == 0 {
+		return nil, nil
+	}
+	resp, err := client.Get(url)
+	if err == nil {
+		return resp, nil
+	} else if attempts > 1 {
+		time.Sleep(3 * time.Second)
+		return getWithRetry(client, url, attempts - 1)
+	}
+	return nil, err
 }
 
 func fetchMeasurements(location, db string) ([]string, error) {
@@ -406,26 +449,51 @@ func streamData(location, db, rp string, measurement string, where string) (chan
 	if where != "" {
 		stmt += ` WHERE ` + where
 	}
-	resp, err := get(stmt, location, db, true)
+	ch := make(chan result)
+
+	// Check if it is able to respond to fail fast
+	_, err := get(limitQuery(stmt, 1, 0), location, db, true)
 	if err != nil {
-		return nil, err
+		return ch, err
 	}
 
-	ch := make(chan result)
-	scanner := bufio.NewScanner(resp.Body)
 	go (func() {
-		for scanner.Scan() {
-			var r response
-			err := json.Unmarshal([]byte(scanner.Text()), &r)
-			// TODO Figure out what to do if we can't parse the data.
+		offset := 0
+		limit := 10000
+		defer close(ch)
+
+		for {
+			var resultCount int
+			limitedQuery := limitQuery(stmt, limit, offset)
+
+			// If there is an error here, it is not much we can do.
+			resp, err := get(limitedQuery, location, db, true)
 			if err != nil {
-				log.Panic(err)
+				return
 			}
-			for _, result := range r.Results {
-				ch <- result
+
+			scanner := bufio.NewScanner(resp.Body)
+			for scanner.Scan() {
+				var r response
+				err := json.Unmarshal([]byte(scanner.Text()), &r)
+				if err != nil {
+					continue
+				}
+				for _, result := range r.Results {
+					ch <- result
+					resultCount += len(result.Series)
+				}
+			}
+
+			offset += limit
+			if resultCount == 0 {
+				return
 			}
 		}
-		close(ch)
 	})()
 	return ch, nil
+}
+
+func limitQuery(query string, limit, offset int) string {
+	return fmt.Sprintf("%s LIMIT %d OFFSET %d", query, limit, offset)
 }

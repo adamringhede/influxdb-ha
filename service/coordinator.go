@@ -100,7 +100,6 @@ func mergeSortResults(groupedResults map[string][]Result, less compareLess) []Re
 					min = i
 				}
 			}
-			println(min)
 			if len(group[min].Series[0].Values) > 0 {
 				merged.Series[0].Values = append(merged.Series[0].Values, group[min].Series[0].Values[0])
 				group[min].Series[0].Values = group[min].Series[0].Values[1:]

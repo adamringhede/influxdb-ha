@@ -165,7 +165,7 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// TODO Ping all replicas to make sure they are reachable before making a meta query.
 				// ..return an error if not.
 				// TODO In case one request fails, store in a log in peristent storage so that the command
-				// can be replayed.
+				// can be replayed in order
 				for _, location := range h.resolver.FindAll() {
 					results, err, res := request(s.String(), location, h.client, r)
 					if err != nil {

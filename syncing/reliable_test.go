@@ -46,9 +46,11 @@ func setUpReliableTest() (*clientv3.Client, *cluster.Resolver) {
 func TestReliableImporter(t *testing.T) {
 	etcdClient, resolver := setUpReliableTest()
 
-	importer := &BasicImporter{Predicate: func(db, msmt string) ImportDecision {
+	partitioner := cluster.NewPartitioner()
+	partitioner.AddKey(cluster.PartitionKey{Database: testDB, Measurement: "treasures", Tags: []string{"type"}})
+	importer := NewImporter(resolver, partitioner, func(db, msmt string) ImportDecision {
 		return PartitionImport
-	}}
+	})
 
 	wq := cluster.NewEtcdWorkQueue(etcdClient, "local", "import")
 	wq.Clear()

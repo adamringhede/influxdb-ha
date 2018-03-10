@@ -2,8 +2,9 @@ package cluster
 
 import (
 	"testing"
-	"github.com/stretchr/testify/assert"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestNewLocalSaver(t *testing.T) {
@@ -15,7 +16,7 @@ func TestNewLocalSaver(t *testing.T) {
 	time.Sleep(1)
 	ch, err := s.Get("node1")
 	assert.NoError(t, err)
-	res := <- ch
+	res := <-ch
 	assert.Equal(t, "mydb", res.DB)
 	assert.Equal(t, "default", res.RP)
 	assert.Equal(t, "test", string(res.Buf))

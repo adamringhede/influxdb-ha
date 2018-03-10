@@ -10,8 +10,8 @@ func TestResolver_FindAll(t *testing.T) {
 	resolver := NewResolver()
 	assert.Len(t, resolver.FindAll(), 0)
 
-	resolver.AddToken(1, &Node{})
-	resolver.AddToken(2, &Node{})
+	resolver.AddToken(1, &Node{Name: "a", DataLocation: "a"})
+	resolver.AddToken(2, &Node{Name: "b", DataLocation: "b"})
 
 	assert.Len(t, resolver.FindAll(), 2)
 }

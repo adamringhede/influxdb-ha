@@ -107,6 +107,14 @@ func (c *PartitionCollection) GetReverse(key int, count int) []*Partition {
 	return res
 }
 
+func (c *PartitionCollection) GetPartition(key int) (*Partition, bool) {
+	n, ok := c.findNode(key)
+	if !ok {
+		return nil, ok
+	}
+	return n.Value.(*Partition), ok
+}
+
 func (c *PartitionCollection) findNode(key int) (*avltree.Node, bool) {
 	if c.tree.Size() == 0 {
 		return nil, false

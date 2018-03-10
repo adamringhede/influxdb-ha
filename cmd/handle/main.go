@@ -89,8 +89,26 @@ func main() {
 	handleErr(err)
 	resolver.ReplicationFactor = defaultReplicationFactor
 
-	_, importWQ := startImporter(c, resolver, *localNode)
+	partitioner, err := cluster.NewSyncedPartitioner(partitionKeyStorage)
+	handleErr(err)
+	partitioner.AddKey(cluster.PartitionKey{
+		Database:    "sharded",
+		Measurement: "treasures",
+		Tags:        []string{"type"},
+	})
 
+	predicate := syncing.ClusterImportPredicate{
+		LocalNode: *localNode,
+		PartitionKeys: partitioner,
+		Resolver: resolver,
+	}
+
+	partitioner.AddKey(cluster.PartitionKey{})
+	importer := syncing.NewImporter(resolver, partitioner, predicate.Test)
+
+	_, importWQ := startImporter(importer, c, resolver, *localNode)
+
+	// TODO change this to another way of handling node removal in the request.
 	nodeStorage.OnRemove(func(removedNode cluster.Node) {
 		// Distribute tokens to other nodes
 		nodes := []string{}
@@ -117,16 +135,10 @@ func main() {
 			}
 		}
 		for nodeName, tokens := range tokenGroups {
-			importWQ.Push(nodeName, syncing.ReliableImportPayload{Tokens: tokens})
+			importWQ.Push(nodeName, syncing.ReliableImportPayload{Tokens: tokens, NonPartitioned: true})
+			// TODO Do not forget to also assign the tokens, not just importing the data.
+			// This should probably be done after performing the import though.
 		}
-	})
-
-	partitioner, err := cluster.NewSyncedPartitioner(partitionKeyStorage)
-	handleErr(err)
-	partitioner.AddKey(cluster.PartitionKey{
-		Database:    "sharded",
-		Measurement: "treasures",
-		Tags:        []string{"type"},
 	})
 
 	go (func() {
@@ -162,7 +174,7 @@ func main() {
 			localNode.Status = cluster.NodeStatusRecovering
 			nodeStorage.Save(localNode)
 
-			err = join(localNode, tokenStorage, resolver)
+			err = join(localNode, tokenStorage, resolver, importer)
 			handleErr(err)
 
 			localNode.Status = cluster.NodeStatusUp
@@ -187,7 +199,7 @@ func tokensToString(tokens []int, sep string) string {
 	return strings.Join(res, sep)
 }
 
-func join(localNode *cluster.Node, tokenStorage *cluster.EtcdTokenStorage, resolver *cluster.Resolver) error {
+func join(localNode *cluster.Node, tokenStorage *cluster.EtcdTokenStorage, resolver *cluster.Resolver, importer syncing.Importer) error {
 	toSteal, err := tokenStorage.SuggestReservations()
 	log.Printf("Stealing %d tokens: [%s]", len(toSteal), tokensToString(toSteal, " "))
 	if err != nil {
@@ -208,7 +220,7 @@ func join(localNode *cluster.Node, tokenStorage *cluster.EtcdTokenStorage, resol
 	}
 
 	log.Println("Starting import of primary data")
-	importer := &syncing.BasicImporter{}
+	importer.ImportNonPartitioned(resolver, localNode.DataLocation)
 	importer.Import(reserved, resolver, localNode.DataLocation)
 
 	oldPrimaries := map[int]*cluster.Node{}
@@ -287,8 +299,7 @@ func handleErr(err error) {
 	}
 }
 
-func startImporter(etcdClient *clientv3.Client, resolver *cluster.Resolver, localNode cluster.Node) (*syncing.ReliableImporter, cluster.WorkQueue) {
-	importer := &syncing.BasicImporter{}
+func startImporter(importer syncing.Importer, etcdClient *clientv3.Client, resolver *cluster.Resolver, localNode cluster.Node) (*syncing.ReliableImporter, cluster.WorkQueue) {
 	wq := cluster.NewEtcdWorkQueue(etcdClient, localNode.Name, syncing.ReliableImportWorkName)
 	reliableImporter := syncing.NewReliableImporter(importer, wq, resolver, localNode.DataLocation)
 	go reliableImporter.Start()

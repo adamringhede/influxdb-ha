@@ -8,8 +8,10 @@ import (
 	"github.com/coreos/etcd/mvcc/mvccpb"
 )
 
+type ResolvePurpose int
+
 const (
-	WRITE = iota
+	WRITE ResolvePurpose = iota
 	READ
 )
 
@@ -34,7 +36,15 @@ func NewResolverWithNodes(nodes NodeCollection) *Resolver {
 	return &Resolver{NewPartitionCollection(), nodes, 2}
 }
 
-func (r *Resolver) FindNodesByKey(key int, purpose int) []*Node {
+func (r *Resolver) FindTokenByKey(key int) (int, bool) {
+	partition, ok := r.collection.GetPartition(key)
+	if !ok {
+		return 0, ok
+	}
+	return partition.Token, ok
+}
+
+func (r *Resolver) FindNodesByKey(key int, purpose ResolvePurpose) []*Node {
 	partitions := r.collection.GetMultiple(key, r.ReplicationFactor)
 	nodesMap := make(map[*Node]bool)
 	for _, p := range partitions {
@@ -54,9 +64,9 @@ func (r *Resolver) FindNodesByKey(key int, purpose int) []*Node {
 }
 
 // FindByKey can return multiple locations for replication and load balancing.
-// On reads, it will not return nodes with status "syncing"
-// However, on writes it will return "syncing" nodes so that they can catch up.
-func (r *Resolver) FindByKey(key int, purpose int) []string {
+// On reads, it will not return nodes with status "recovering"
+// However, on writes it will return recoverings nodes so that they can catch up.
+func (r *Resolver) FindByKey(key int, purpose ResolvePurpose) []string {
 	locations := []string{}
 	for _, node := range r.FindNodesByKey(key, purpose) {
 		locations = append(locations, node.DataLocation)
@@ -122,6 +132,9 @@ func (r *Resolver) RemoveAllTokens() {
 func (r *Resolver) AddToken(token int, node *Node) {
 	p := &Partition{token, node}
 	r.collection.Put(p)
+	if _, exists := r.nodes.Get(node.Name); !exists {
+		r.nodes.Persist(*node)
+	}
 }
 
 func (r *Resolver) RemoveToken(token int) {

@@ -49,24 +49,23 @@ func Test_fetchLocationMeta(t *testing.T) {
 func TestImporter(t *testing.T) {
 	initiate()
 	resolver := cluster.NewResolver()
-	for _, token := range []int{0, 100} {
+	for _, token := range []int{3012244896, 3960162835} {
 		resolver.AddToken(token, &cluster.Node{[]int{}, cluster.NodeStatusUp, influxOne, "influx-1"})
 	}
 
 	postLines(influxOne, testDB, "autogen", []string{
-		"treasures,type=gold," + cluster.PartitionTagName + "=0 value=5",
-		"treasures,type=silver," + cluster.PartitionTagName + "=100 value=4",
+		"treasures,type=gold," + cluster.PartitionTagName + "=3966162835 value=5",
+		"treasures,type=silver," + cluster.PartitionTagName + "=3042244896 value=4",
 	})
 
-	importer := &BasicImporter{Predicate: func(_, _ string) ImportDecision {
-		return PartitionImport
-	}}
-	importer.Import([]int{0}, resolver, influxTwo)
+	partitioner := cluster.NewPartitioner()
+	partitioner.AddKey(cluster.PartitionKey{Database: testDB, Measurement: "treasures", Tags: []string{"type"}})
+
+	importer := NewImporter(resolver, partitioner, AlwaysPartitionImport)
+	importer.Import([]int{3012244896}, resolver, influxTwo)
 
 	results, err := fetchSimple("SELECT * FROM treasures", influxTwo, testDB)
 	assert.NoError(t, err)
 	assert.Len(t, results[0].Series[0].Values, 1)
-	assert.Equal(t, "gold", results[0].Series[0].Values[0][2].(string))
-
-	// TODO test recover from failed import
+	assert.Equal(t, "silver", results[0].Series[0].Values[0][2].(string))
 }

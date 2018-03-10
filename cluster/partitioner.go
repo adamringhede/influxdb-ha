@@ -27,12 +27,24 @@ type Partitioner interface {
 	AddKeys(keys []PartitionKey)
 }
 
+type PartitionKeyCollection interface {
+	GetPartitionKeys() []PartitionKey
+}
+
 type BasicPartitioner struct {
 	partitionKeys map[string]PartitionKey
 }
 
 func NewPartitioner() *BasicPartitioner {
 	return &BasicPartitioner{make(map[string]PartitionKey)}
+}
+
+func (p *BasicPartitioner) GetPartitionKeys() []PartitionKey {
+	keys := []PartitionKey{}
+	for _, key := range p.partitionKeys {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 func createCompoundKeys(key PartitionKey, tags map[string][]string) []string {
@@ -67,7 +79,7 @@ func (p *BasicPartitioner) GetHashes(key PartitionKey, tags map[string][]string)
 	return hashes
 }
 
-func (p *BasicPartitioner) GetHash(key PartitionKey, tags map[string][]string) (int, error) {
+func GetHash(key PartitionKey, tags map[string][]string) (int, error) {
 	compoundKey := []string{}
 	for _, tag := range key.Tags {
 		if values, ok := tags[tag]; ok {
