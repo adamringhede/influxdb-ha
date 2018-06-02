@@ -53,6 +53,10 @@ func TestImporter(t *testing.T) {
 		resolver.AddToken(token, &cluster.Node{[]int{}, cluster.NodeStatusUp, influxOne, "influx-1"})
 	}
 
+	multiple(influxOne, []string{
+		"CREATE RETENTION POLICY rp_test ON " + testDB + " DURATION 1h REPLICATION 1",
+	})
+
 	postLines(influxOne, testDB, "autogen", []string{
 		"treasures,type=gold," + cluster.PartitionTagName + "=3966162835 value=5",
 		"treasures,type=silver," + cluster.PartitionTagName + "=3042244896 value=4",
@@ -64,8 +68,13 @@ func TestImporter(t *testing.T) {
 	importer := NewImporter(resolver, partitioner, AlwaysPartitionImport)
 	importer.Import([]int{3012244896}, resolver, influxTwo)
 
+	time.Sleep(10 * time.Millisecond)
 	results, err := fetchSimple("SELECT * FROM treasures", influxTwo, testDB)
 	assert.NoError(t, err)
 	assert.Len(t, results[0].Series[0].Values, 1)
 	assert.Equal(t, "silver", results[0].Series[0].Values[0][2].(string))
+
+	results, err = fetchSimple("SHOW RETENTION POLICIES", influxTwo, testDB)
+	assert.Len(t, results[0].Series[0].Values, 2)
+
 }

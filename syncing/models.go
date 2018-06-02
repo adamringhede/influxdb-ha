@@ -19,3 +19,11 @@ type result struct {
 type response struct {
 	Results []result `json:"results"`
 }
+
+type RetentionPolicy struct {
+	Name               string
+	Duration           string
+	ShardGroupDuration string
+	Replicas           int
+	Default            bool
+}

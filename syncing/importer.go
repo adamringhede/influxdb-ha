@@ -92,18 +92,17 @@ func (p *ClusterImportPredicate) Test(db, msmt string) ImportDecision {
 }
 
 type BasicImporter struct {
-	loader    Loader
-	Predicate ImportDecisionTester
+	loader        Loader
+	Predicate     ImportDecisionTester
 	PartitionKeys cluster.PartitionKeyCollection
 	Resolver      *cluster.Resolver
 
 	// cache
-	createdDatabases  map[string]bool
-	locationsMeta map[string]locationMeta
+	createdDatabases map[string]bool
+	locationsMeta    map[string]locationMeta
 }
 
-
-func NewImporter (resolver *cluster.Resolver, partitionKeys cluster.PartitionKeyCollection, predicate ImportDecisionTester) *BasicImporter {
+func NewImporter(resolver *cluster.Resolver, partitionKeys cluster.PartitionKeyCollection, predicate ImportDecisionTester) *BasicImporter {
 	return &BasicImporter{Predicate: predicate, Resolver: resolver, PartitionKeys: partitionKeys}
 }
 
@@ -145,7 +144,7 @@ func (i *BasicImporter) ensureCache() {
 	}
 }
 
-func (i *BasicImporter) forEachDatabase(location string, target string, fn func (db string, dbMeta *databaseMeta)) {
+func (i *BasicImporter) forEachDatabase(location string, target string, fn func(db string, dbMeta *databaseMeta)) {
 	i.ensureCache()
 	meta, ok := i.locationsMeta[location]
 	if !ok {
@@ -160,6 +159,8 @@ func (i *BasicImporter) forEachDatabase(location string, target string, fn func 
 	for db, dbMeta := range meta.databases {
 		if _, hasDB := i.createdDatabases[db]; !hasDB {
 			createDatabase(db, target)
+			createRPs(db, dbMeta.rpsSettings, target)
+
 			i.createdDatabases[db] = true
 		}
 		fn(db, dbMeta)
@@ -196,6 +197,7 @@ func persistStream(importCh chan result, dbMeta *databaseMeta, target, db, rp st
 		for _, row := range res.Series {
 			lines = append(lines, parseLines(row, dbMeta.tagKeys)...)
 		}
+		// TODO handle authentication
 		_, err := postLines(target, db, rp, lines)
 		if err != nil {
 			// TODO handle any type of failure to write locally.
@@ -207,15 +209,35 @@ func persistStream(importCh chan result, dbMeta *databaseMeta, target, db, rp st
 
 func createDatabase(db, target string) {
 	log.Printf("Creating database %s", db)
-	// TODO create users and retention policies as well
-	resp, err := get("CREATE DATABASE "+db, target, "", false)
-	if resp.StatusCode != 200 {
-		log.Fatalf("Received invalid status code %d", resp.StatusCode)
-	}
-	if err != nil {
-		log.Panic(err)
+	handleInfluxError(get("CREATE DATABASE "+db, target, "", false))
+}
+
+func createRPs(db string, rps []RetentionPolicy, target string) {
+	for _, rp := range rps {
+		createRetentionPolicy(db, rp, target)
 	}
 }
+
+func createRetentionPolicy(db string, rp RetentionPolicy, target string) {
+	log.Printf("Creating retention policy %s", rp.Name)
+	q := fmt.Sprintf(`CREATE RETENTION POLICY "%s" ON "%s" DURATION %s REPLICATION 1`, rp.Name, db, rp.Duration)
+	if rp.Default {
+		q += " DEFAULT"
+	}
+	handleInfluxError(get(q, target, db, false))
+}
+
+func handleInfluxError(resp *http.Response, err error) error {
+	if resp.StatusCode != 200 {
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read body: %s", err)
+		}
+		log.Fatalf("Received invalid status code %d. Body: %s", resp.StatusCode, string(body))
+	}
+	return err
+}
+
 
 func postLines(location, db, rp string, lines []string) (*http.Response, error) {
 	return postData(location, db, rp, []byte(strings.Join(lines, "\n")))
@@ -234,6 +256,8 @@ func postData(location, db, rp string, buf []byte) (*http.Response, error) {
 	req.URL.RawQuery = strings.Join(query, "&")
 	req.Header.Set("Content-Type", "text/plain")
 	req.Header.Set("Content-Length", strconv.Itoa(len(buf)))
+	// TODO Fix authentication support. This node need admin access
+	// This is different from user authentication.
 	//if auth != "" {
 	//	req.Header.Set("Authorization", auth)
 	//}
@@ -316,6 +340,11 @@ func fetchLocationMeta(location string) (locationMeta, error) {
 			return meta, err
 		}
 		dbMeta.rps = rps
+		rpsSettings, err := fetchRetentionPoliciesWithSettings(location, db)
+		if err != nil {
+			return meta, err
+		}
+		dbMeta.rpsSettings = rpsSettings
 		tagKeys, err := fetchTagKeys(location, db)
 		if err != nil {
 			return meta, err
@@ -341,12 +370,14 @@ func newLocationMeta() locationMeta {
 type databaseMeta struct {
 	measurements []string
 	rps          []string
+	rpsSettings  []RetentionPolicy
 	tagKeys      map[string]bool
-	series 		 []Series
+	series       []Series
 }
 
 func newDatabaseMeta() *databaseMeta {
-	return &databaseMeta{[]string{}, []string{}, map[string]bool{}, []Series{}}
+	return &databaseMeta{[]string{}, []string{}, []RetentionPolicy{},
+		map[string]bool{}, []Series{}}
 }
 
 func get(q string, location string, db string, chunked bool) (*http.Response, error) {
@@ -357,7 +388,7 @@ func get(q string, location string, db string, chunked bool) (*http.Response, er
 		log.Panic(err)
 	}
 	encoded := values.Encode()
-	return getWithRetry(client, "http://" + location + "/query?" + encoded, 5)
+	return getWithRetry(client, "http://"+location+"/query?"+encoded, 5)
 }
 
 func getWithRetry(client *http.Client, url string, attempts int) (*http.Response, error) {
@@ -369,7 +400,7 @@ func getWithRetry(client *http.Client, url string, attempts int) (*http.Response
 		return resp, nil
 	} else if attempts > 1 {
 		time.Sleep(3 * time.Second)
-		return getWithRetry(client, url, attempts - 1)
+		return getWithRetry(client, url, attempts-1)
 	}
 	return nil, err
 }
@@ -384,6 +415,26 @@ func fetchDatabases(location string) ([]string, error) {
 
 func fetchRetentionPolicies(location, db string) ([]string, error) {
 	return fetchShow("RETENTION POLICIES", location, db)
+}
+
+func fetchRetentionPoliciesWithSettings(location, db string) ([]RetentionPolicy, error) {
+	results, err := fetchSimple(`SHOW RETENTION POLICIES`, location, db)
+	if err != nil {
+		return nil, err
+	}
+	var rps []RetentionPolicy
+	for _, row := range results[0].Series {
+		for _, value := range row.Values {
+			rps = append(rps, RetentionPolicy{
+				Name:               value[0].(string),
+				Duration:           value[1].(string),
+				ShardGroupDuration: value[2].(string),
+				Replicas:           int(value[3].(float64)),
+				Default:            value[4].(bool),
+			})
+		}
+	}
+	return rps, nil
 }
 
 func fetchTagKeys(location, db string) (map[string]bool, error) {
