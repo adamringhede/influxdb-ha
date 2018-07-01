@@ -160,6 +160,7 @@ func (i *BasicImporter) forEachDatabase(location string, target string, fn func(
 		if _, hasDB := i.createdDatabases[db]; !hasDB {
 			createDatabase(db, target)
 			createRPs(db, dbMeta.rpsSettings, target)
+			createCQs(db, dbMeta.cqs, target)
 
 			i.createdDatabases[db] = true
 		}
@@ -227,6 +228,17 @@ func createRetentionPolicy(db string, rp RetentionPolicy, target string) {
 	handleInfluxError(get(q, target, db, false))
 }
 
+func createCQs(db string, cqs []ContinuousQuery, target string) {
+	for _, cq := range cqs {
+		createContinuousQuery(db, cq, target)
+	}
+}
+
+func createContinuousQuery(db string, cq ContinuousQuery, target string) {
+	log.Printf("Creating continuous query %s", cq.Name)
+	handleInfluxError(get(cq.Query, target, db, false))
+}
+
 func handleInfluxError(resp *http.Response, err error) error {
 	if resp.StatusCode != 200 {
 		body, err := ioutil.ReadAll(resp.Body)
@@ -237,7 +249,6 @@ func handleInfluxError(resp *http.Response, err error) error {
 	}
 	return err
 }
-
 
 func postLines(location, db, rp string, lines []string) (*http.Response, error) {
 	return postData(location, db, rp, []byte(strings.Join(lines, "\n")))
@@ -327,29 +338,39 @@ func fetchLocationMeta(location string) (locationMeta, error) {
 		if db == "_internal" {
 			continue
 		}
-		// TODO figure out if it is needed to use pointers here
 		meta.databases[db] = newDatabaseMeta()
 		dbMeta := meta.databases[db]
+
 		measurements, err := fetchMeasurements(location, db)
 		if err != nil {
 			return meta, err
 		}
 		dbMeta.measurements = measurements
+
 		rps, err := fetchRetentionPolicies(location, db)
 		if err != nil {
 			return meta, err
 		}
 		dbMeta.rps = rps
+
 		rpsSettings, err := fetchRetentionPoliciesWithSettings(location, db)
 		if err != nil {
 			return meta, err
 		}
 		dbMeta.rpsSettings = rpsSettings
+
+		cqs, err := fetchContinuousQueries(location, db)
+		if err != nil {
+			return meta, err
+		}
+		dbMeta.cqs = cqs
+
 		tagKeys, err := fetchTagKeys(location, db)
 		if err != nil {
 			return meta, err
 		}
 		dbMeta.tagKeys = tagKeys
+
 		series, err := FetchSeries(location, db)
 		if err != nil {
 			return meta, err
@@ -371,13 +392,19 @@ type databaseMeta struct {
 	measurements []string
 	rps          []string
 	rpsSettings  []RetentionPolicy
+	cqs          []ContinuousQuery
 	tagKeys      map[string]bool
 	series       []Series
 }
 
 func newDatabaseMeta() *databaseMeta {
-	return &databaseMeta{[]string{}, []string{}, []RetentionPolicy{},
-		map[string]bool{}, []Series{}}
+	return &databaseMeta{
+		measurements: []string{},
+		rps:          []string{},
+		rpsSettings:  []RetentionPolicy{},
+		cqs:          []ContinuousQuery{},
+		tagKeys:      map[string]bool{},
+		series:       []Series{}}
 }
 
 func get(q string, location string, db string, chunked bool) (*http.Response, error) {
@@ -435,6 +462,23 @@ func fetchRetentionPoliciesWithSettings(location, db string) ([]RetentionPolicy,
 		}
 	}
 	return rps, nil
+}
+
+func fetchContinuousQueries(location, db string) ([]ContinuousQuery, error) {
+	results, err := fetchSimple(`SHOW CONTINUOUS QUERIES`, location, db)
+	if err != nil {
+		return nil, err
+	}
+	var cqs []ContinuousQuery
+	for _, row := range results[0].Series {
+		for _, value := range row.Values {
+			cqs = append(cqs, ContinuousQuery{
+				Name:  value[0].(string),
+				Query: value[1].(string),
+			})
+		}
+	}
+	return cqs, nil
 }
 
 func fetchTagKeys(location, db string) (map[string]bool, error) {

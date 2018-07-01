@@ -27,3 +27,8 @@ type RetentionPolicy struct {
 	Replicas           int
 	Default            bool
 }
+
+type ContinuousQuery struct {
+	Name  string
+	Query string
+}

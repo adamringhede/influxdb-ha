@@ -7,7 +7,7 @@ import (
 
 	"github.com/adamringhede/influxdb-ha/cluster"
 	"github.com/stretchr/testify/assert"
-)
+	)
 
 const influxOne = "192.168.99.100:28086"
 const influxTwo = "192.168.99.100:27086"
@@ -55,6 +55,8 @@ func TestImporter(t *testing.T) {
 
 	multiple(influxOne, []string{
 		"CREATE RETENTION POLICY rp_test ON " + testDB + " DURATION 1h REPLICATION 1",
+		"CREATE CONTINUOUS QUERY average_treasure ON " + testDB +
+			" BEGIN SELECT mean(value) INTO mean_treasure FROM treasures GROUP BY time(1h) END",
 	})
 
 	postLines(influxOne, testDB, "autogen", []string{
@@ -75,6 +77,9 @@ func TestImporter(t *testing.T) {
 	assert.Equal(t, "silver", results[0].Series[0].Values[0][2].(string))
 
 	results, err = fetchSimple("SHOW RETENTION POLICIES", influxTwo, testDB)
-	assert.Len(t, results[0].Series[0].Values, 2)
+	assert.Len(t, results[0].Series[0].Values, 2) // autogen + 1
+
+	results, err = fetchSimple("SHOW CONTINUOUS QUERIES", influxTwo, testDB)
+	assert.Len(t, results[0].Series[1].Values, 1)
 
 }
