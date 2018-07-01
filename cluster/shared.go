@@ -1,6 +1,9 @@
 package cluster
 
-import "github.com/coreos/etcd/clientv3"
+import (
+	"github.com/coreos/etcd/clientv3"
+	"strings"
+)
 
 const etcdStorageBaseDir = "influxdbCluster"
 const etcdStorageReservedTokens = "reservedTokens"
@@ -10,6 +13,6 @@ type EtcdStorageBase struct {
 	Client    *clientv3.Client
 }
 
-func (s *EtcdStorageBase) path(path string) string {
-	return etcdStorageBaseDir + "/" + s.ClusterID + "/" + path + "/"
+func (s *EtcdStorageBase) path(paths ...string) string {
+	return etcdStorageBaseDir + "/" + s.ClusterID + "/" + strings.Join(paths, "/") + "/"
 }

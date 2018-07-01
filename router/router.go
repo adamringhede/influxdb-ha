@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/influxdata/influxdb-relay/relay"
-	"github.com/influxdata/influxdb/influxql"
+	"github.com/influxdata/influxql"
 	"github.com/influxdata/influxdb/models"
 	"io"
 	"log"

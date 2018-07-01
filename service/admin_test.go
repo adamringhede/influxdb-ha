@@ -11,6 +11,7 @@ import (
 	"github.com/adamringhede/influxdb-ha/cluster"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/stretchr/testify/assert"
+	"fmt"
 )
 
 func TestShowPartitionKeys(t *testing.T) {
@@ -84,8 +85,12 @@ func setupAdminTest() (cluster.PartitionKeyStorage, *ClusterHandler) {
 	return pks, ch
 }
 
-func mustNotQueryCluster(t *testing.T, ch *ClusterHandler, cmd string) (int, string) {
-	resp := _execClusterCommand(ch, cmd)
+func mustNotQueryCluster(t *testing.T, handler http.Handler, cmd string) (int, string) {
+	return mustNotQueryClusterAuth(t, handler, cmd, "")
+}
+
+func mustNotQueryClusterAuth(t *testing.T, handler http.Handler, cmd string, auth string) (int, string) {
+	resp := _execClusterCommand(handler, cmd, auth)
 	assert.NotEqual(t, resp.StatusCode, 200)
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
@@ -94,8 +99,12 @@ func mustNotQueryCluster(t *testing.T, ch *ClusterHandler, cmd string) (int, str
 	return resp.StatusCode, strings.TrimRight(string(body), "\n")
 }
 
-func mustQueryCluster(t *testing.T, ch *ClusterHandler, cmd string) []Result {
-	resp := _execClusterCommand(ch, cmd)
+func mustQueryCluster(t *testing.T, handler http.Handler, cmd string) []Result {
+	return mustQueryClusterAuth(t, handler, cmd, "")
+}
+
+func mustQueryClusterAuth(t *testing.T, handler http.Handler, cmd string, auth string) []Result {
+	resp := _execClusterCommand(handler, cmd, auth)
 	if resp.StatusCode != 200 {
 		body, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
@@ -106,10 +115,10 @@ func mustQueryCluster(t *testing.T, ch *ClusterHandler, cmd string) []Result {
 	return parseResp(resp.Body, false).Results
 }
 
-func _execClusterCommand(ch *ClusterHandler, cmd string) *http.Response {
-	req := httptest.NewRequest("GET", "http://localhost?q="+url.QueryEscape(cmd), nil)
+func _execClusterCommand(handler http.Handler, cmd string, auth string) *http.Response {
+	req := httptest.NewRequest("GET", fmt.Sprintf("http://%s@localhost/query?q=%s&db=%s", auth, url.QueryEscape(cmd), testDB), nil)
 	w := httptest.NewRecorder()
-	ch.ServeHTTP(w, req)
+	handler.ServeHTTP(w, req)
 	return w.Result()
 }
 
@@ -184,17 +193,4 @@ func (s *MockedPartitionKeyStorage) Drop(db, msmt string) error {
 
 func (s *MockedPartitionKeyStorage) GetAll() ([]*cluster.PartitionKey, error) {
 	return s.storage, nil
-}
-
-func startServer() {
-	resolver := cluster.NewResolver()
-	partitioner := cluster.NewPartitioner()
-	pks := NewMockedPartitionKeyStorage()
-
-	pks.Save(&cluster.PartitionKey{"test_db", "cpu", []string{"server_id"}})
-
-	go Start(resolver, partitioner, cluster.NewLocalRecoveryStorage("./", nil), pks, nil, Config{
-		"0.0.0.0",
-		8099,
-	})
 }

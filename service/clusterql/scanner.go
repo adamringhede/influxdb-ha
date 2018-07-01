@@ -172,7 +172,7 @@ func (s *Scanner) scanIdent() (tok Token, lit string) {
 	if isInt(str) {
 		return NUM, str
 	} else if isString(str) {
-		return STR, str
+		return STR, strings.Trim(str, "\"")
 	}
 
 	// Otherwise return as a regular identifier.

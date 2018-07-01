@@ -13,6 +13,7 @@ import (
 
 func TestRouting(t *testing.T) {
 	// TODO start a node locally and run the write query
+	t.Skip()
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	//q := `select * from cpu_load_short GROUP BY *`

@@ -8,10 +8,13 @@ import (
 )
 
 func createEtcdNodeStorage() *EtcdNodeStorage {
-	c, _ := clientv3.New(clientv3.Config{
+	c, err := clientv3.New(clientv3.Config{
 		Endpoints:   []string{"http://127.0.0.1:2379"},
 		DialTimeout: 5 * time.Second,
 	})
+	if err != nil {
+		panic(err)
+	}
 	return NewEtcdNodeStorage(c)
 }
 

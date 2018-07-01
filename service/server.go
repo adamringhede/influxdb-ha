@@ -20,13 +20,17 @@ func Start(
 	recovery cluster.RecoveryStorage,
 	pks cluster.PartitionKeyStorage,
 	ns cluster.NodeStorage,
+	auth AuthService,
 	config Config) {
 
 	addr := config.BindAddr + ":" + strconv.FormatInt(int64(config.BindPort), 10)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	ch := &ClusterHandler{pks, ns}
-	http.Handle("/", &QueryHandler{client, resolver, partitioner, ch})
+	// TODO Add support for authentication and autherozation here as we can not use InfluxDBs here. It would require
+	// manually setting up the password on each node.
+
+	http.Handle("/", &QueryHandler{client, resolver, partitioner, ch, auth})
 	http.Handle("/write", &WriteHandler{client, resolver, partitioner, recovery})
 
 	log.Println("Listening on " + addr)

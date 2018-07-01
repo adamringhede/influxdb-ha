@@ -91,7 +91,7 @@ func (s *EtcdSettingsStorage) GetAll() ([]*PartitionKey, error) {
 	if getErr != nil {
 		return nil, getErr
 	}
-	items := []*PartitionKey{}
+	var items []*PartitionKey
 	for _, kv := range resp.Kvs {
 		var node PartitionKey
 		valueErr := json.Unmarshal(kv.Value, &node)

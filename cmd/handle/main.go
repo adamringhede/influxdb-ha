@@ -47,6 +47,7 @@ func main() {
 	settingsStorage := cluster.NewEtcdSettingsStorage(c)
 	partitionKeyStorage := cluster.NewEtcdPartitionKeyStorage(c)
 	recoveryStorage := cluster.NewLocalRecoveryStorage("./", hintsStorage)
+	authStorage := cluster.NewEtcdAuthStorage(c)
 
 	nodeStorage.ClusterID = *clusterID
 	tokenStorage.ClusterID = *clusterID
@@ -106,7 +107,10 @@ func main() {
 	partitioner.AddKey(cluster.PartitionKey{})
 	importer := syncing.NewImporter(resolver, partitioner, predicate.Test)
 
-	_, importWQ := startImporter(importer, c, resolver, *localNode)
+	reliableImporter, importWQ := startImporter(importer, c, resolver, *localNode)
+	reliableImporter.AfterImport = func(token int) {
+		tokenStorage.Assign(token, localNode.Name)
+	}
 
 	// TODO change this to another way of handling node removal in the request.
 	nodeStorage.OnRemove(func(removedNode cluster.Node) {
@@ -136,8 +140,6 @@ func main() {
 		}
 		for nodeName, tokens := range tokenGroups {
 			importWQ.Push(nodeName, syncing.ReliableImportPayload{Tokens: tokens, NonPartitioned: true})
-			// TODO Do not forget to also assign the tokens, not just importing the data.
-			// This should probably be done after performing the import though.
 		}
 	})
 
@@ -154,10 +156,12 @@ func main() {
 		BindPort: *bindClientPort,
 	}
 
+	authService := service.NewPersistentAuthService(authStorage)
+
 	// Starting the service here so that the node can receive writes while joining.
 	// TODO Create a cluster manager component that uses all these storage components etc to not
 	// have to pass all of them along.
-	go service.Start(resolver, partitioner, recoveryStorage, partitionKeyStorage, nodeStorage, httpConfig)
+	go service.Start(resolver, partitioner, recoveryStorage, partitionKeyStorage, nodeStorage, authService, httpConfig)
 
 	// If anythong above fails, it is no longer seen as new and the below will not execute.
 	if isNew {

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/influxdata/influxdb/influxql"
+	"github.com/influxdata/influxql"
 )
 
 type ResultSource interface {
@@ -149,7 +149,7 @@ func createQueryNode(expr influxql.Expr, qb *QueryBuilder) (QueryNode, error) {
 		default:
 			/*
 				Not supported:
-				integral, median, stddev, sample, percentile, first, last
+				integral, median, stddev, sample, percentile, first, last, moving avg,
 				as well as all transformations
 
 				First and Last can not be supported as ResultSource.Next only return values and
@@ -215,6 +215,7 @@ func (n *BinaryOp) Next(source ResultSource) []float64 {
 		// This should not be possible in practice as only top and bottom may return multiple values
 		// and they are not allowed in arithmetic operations.
 		panic("Can not use arithmetic operations when there are multiple values in LHS and RHS")
+		// FIXME Use proper error handling instead of panics so that we can return something proper to the client.
 	}
 	var res float64
 	switch n.op {

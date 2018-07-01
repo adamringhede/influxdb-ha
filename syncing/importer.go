@@ -74,7 +74,7 @@ type ClusterImportPredicate struct {
 // - test that the measurement has a partitionKey (otherwise it should not be imported by default)
 // - test that the database hash resolves to the node given the configured replication factor
 // The reason for hashing on database and not measurement is so that queries including multiple measurements
-// don't need to be distributed.
+// don't need to be distributed. In the future we may add support for this as it is probably a useful use case.
 func (p *ClusterImportPredicate) Test(db, msmt string) ImportDecision {
 	for _, pk := range p.PartitionKeys.GetPartitionKeys() {
 		if pk.Database == db && (pk.Measurement == msmt || pk.Measurement == "") {

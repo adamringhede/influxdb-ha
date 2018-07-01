@@ -1,6 +1,6 @@
 package router
 
-import "github.com/influxdata/influxdb/influxql"
+import "github.com/influxdata/influxql"
 
 type tagFinder struct {
 	tags   map[string]bool

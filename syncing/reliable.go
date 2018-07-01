@@ -10,13 +10,13 @@ const (
 	ReliableImportWorkName = "import"
 )
 
-
 // TODO consider maybe including the measurements if we have this information to start with.
 // We need a way to keep track of measurements imported that does not have a partition key.
 // Or if they do not have a partition key, we will import them first or last according to the checkpoint
 type ReliableImportPayload struct {
 	Tokens         []int `json:"Tokens"`
 	NonPartitioned bool
+	AssignToSelf   bool
 }
 
 type ReliableImportCheckpoint struct {
@@ -26,15 +26,17 @@ type ReliableImportCheckpoint struct {
 }
 
 type ReliableImporter struct {
-	importer Importer
-	wq       cluster.WorkQueue
-	resolver *cluster.Resolver
-	target   string
-	stopChan chan bool
+	importer     Importer
+	wq           cluster.WorkQueue
+	resolver     *cluster.Resolver
+	target       string
+	stopChan     chan bool
+	tokenStorage cluster.TokenStorage
+	AfterImport  func(token int)
 }
 
 func NewReliableImporter(importer Importer, wq cluster.WorkQueue, resolver *cluster.Resolver, target string) *ReliableImporter {
-	return &ReliableImporter{importer, wq, resolver, target, make(chan bool)}
+	return &ReliableImporter{importer: importer, wq: wq, resolver: resolver, target: target, stopChan: make(chan bool)}
 }
 
 func (imp *ReliableImporter) Start() {
@@ -85,6 +87,11 @@ func (imp *ReliableImporter) process(taskID string, payload ReliableImportPayloa
 		imp.importer.Import([]int{token}, imp.resolver, imp.target)
 		checkpoint.TokenIndex = i + 1
 		task.Checkpoint = checkpoint
+
+		if imp.AfterImport != nil {
+			imp.AfterImport(token)
+		}
+
 		imp.wq.CheckIn(task)
 	}
 	imp.wq.Complete(task)

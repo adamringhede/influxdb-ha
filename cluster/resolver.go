@@ -22,8 +22,6 @@ const (
 type Resolver struct {
 	// TODO add collection for reserved tokens which are used when writing
 	collection *PartitionCollection
-	// nodes is a set of nodes. It is managed by AddToken and RemoveToken. It should never be
-	// changed outside of those functions.
 	nodes             NodeCollection
 	ReplicationFactor int
 }
@@ -52,9 +50,10 @@ func (r *Resolver) FindNodesByKey(key int, purpose ResolvePurpose) []*Node {
 		// partition may be out of date.
 		node, nodeExists := r.nodes.Get(p.Node.Name)
 		if nodeExists && purpose == READ && node.Status == NodeStatusRecovering {
+			// If a token is assigned to a node
 			continue
 		}
-		nodesMap[p.Node] = true
+		nodesMap[&node] = true
 	}
 	nodes := []*Node{}
 	for node := range nodesMap {
@@ -81,7 +80,9 @@ func (r *Resolver) GetPartition(key int) *Partition {
 func (r *Resolver) FindPrimary(key int) *Node {
 	p := r.collection.Get(key)
 	if p != nil {
-		return p.Node
+		if node, nodeExists := r.nodes.Get(p.Node.Name); nodeExists {
+			return &node
+		}
 	}
 	return nil
 }

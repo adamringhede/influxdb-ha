@@ -7,14 +7,13 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
-	"net/http"
+		"net/http"
 	"net/url"
-	"strings"
-
-	"github.com/adamringhede/influxdb-ha/cluster"
-	"github.com/influxdata/influxdb/influxql"
+		"github.com/adamringhede/influxdb-ha/cluster"
+	"github.com/influxdata/influxql"
 	"github.com/influxdata/influxdb/models"
+	"github.com/influxdata/influxdb/services/meta"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Message represents a user-facing Message to be included with the Result.
@@ -49,16 +48,17 @@ func parseResp(body io.Reader, chunked bool) response {
 	return fullResponse
 }
 
-func passBack(w *http.ResponseWriter, res *http.Response) {
+func passBack(w http.ResponseWriter, res *http.Response) {
+	// TODO Handle nil body when we can't get a result for influx
 	defer res.Body.Close()
 	for k, v := range res.Header {
 		for _, h := range v {
-			(*w).Header().Set(k, h)
+			w.Header().Set(k, h)
 		}
 	}
-	(*w).WriteHeader(res.StatusCode)
-	flusher, _ := (*w).(http.Flusher)
-	_, err := io.Copy(*w, res.Body)
+	w.WriteHeader(res.StatusCode)
+	flusher, _ := w.(http.Flusher)
+	_, err := io.Copy(w, res.Body)
 	flusher.Flush()
 	if err != nil {
 		log.Fatal(err)
@@ -91,6 +91,17 @@ func handleRouteError(target string, err error) {
 	}
 }
 
+func handleBadRequestError(w http.ResponseWriter, err error) {
+	handleErrorWithCode(w, err, http.StatusBadRequest)
+}
+
+func handleErrorWithCode(w http.ResponseWriter, err error, code int) {
+	if err != nil {
+		jsonError(w, code, err.Error())
+		return
+	}
+}
+
 func request(statement string, host string, client *http.Client, r *http.Request) ([]Result, error, *http.Response) {
 	baseUrl, _ := url.Parse("http://" + host + r.URL.Path)
 	queryValues := r.URL.Query()
@@ -103,7 +114,7 @@ func request(statement string, host string, client *http.Client, r *http.Request
 		return results, err, res
 	}
 	if res.StatusCode/100 != 2 {
-		return results, errors.New("Failed request"), res
+		return results, errors.New("failed request"), res
 	}
 	chunked := r.URL.Query().Get("chunked") == "true"
 	response := parseResp(res.Body, chunked)
@@ -115,6 +126,68 @@ type QueryHandler struct {
 	resolver       *cluster.Resolver
 	partitioner    cluster.Partitioner
 	clusterHandler *ClusterHandler
+	authService    AuthService
+}
+
+func (h *QueryHandler) authenticate(r *http.Request) (*cluster.UserInfo, error) {
+	if r.URL.User != nil && r.URL.User.Username() != "" {
+		user := h.authService.User(r.URL.User.Username())
+		if user == nil {
+			return nil, meta.ErrAuthenticate
+		}
+		password, _ := r.URL.User.Password()
+		if bcrypt.CompareHashAndPassword([]byte(user.Hash), []byte(password)) != nil {
+			return nil, meta.ErrAuthenticate
+		}
+		return user, nil
+	}
+	if h.authService.HasAdmin() {
+		return nil, meta.ErrAuthenticate
+	}
+	return nil, nil
+}
+
+func updateUser(user string, authService AuthService, updater func(info *cluster.UserInfo)) error {
+	u := authService.User(user)
+	if u == nil {
+		return meta.ErrUserNotFound
+	} else {
+		updater(u)
+		return authService.UpdateUser(*u)
+	}
+}
+
+func HandleAdminStatement(stmt influxql.Statement, authService AuthService) (err error) {
+	switch s := stmt.(type) {
+	case
+		*influxql.CreateUserStatement:
+		err = authService.CreateUser(cluster.NewUser(s.Name, cluster.HashUserPassword(s.Password), s.Admin))
+	case
+		*influxql.DropUserStatement:
+		err = authService.DeleteUser(s.Name)
+	case
+		*influxql.GrantStatement:
+		err = authService.SetPrivilege(s.User, s.DefaultDatabase(), s.Privilege)
+	case
+		*influxql.GrantAdminStatement:
+		err = updateUser(s.User, authService, func (u *cluster.UserInfo) {
+			u.Admin = true
+		})
+	case
+		*influxql.RevokeStatement:
+		err = authService.RemovePrivilege(s.User, s.DefaultDatabase())
+	case
+		*influxql.RevokeAdminStatement:
+		err = updateUser(s.User, authService, func (u *cluster.UserInfo) {
+			u.Admin = false
+		})
+	case
+		*influxql.SetPasswordUserStatement:
+		err = updateUser(s.Name, authService, func (u *cluster.UserInfo) {
+			u.Hash = cluster.HashUserPassword(s.Password)
+		})
+	}
+	return
 }
 
 func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -122,8 +195,6 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if queryParam != "" {
 		allResults := []Result{}
 		if isAdminQuery(queryParam) {
-			// TODO add clust handler as a dependancy on query handler
-			//handleAdmin(w, r, queryParam)
 			h.clusterHandler.ServeHTTP(w, r)
 			return
 		}
@@ -136,42 +207,60 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, http.StatusBadRequest, "error parsing query: "+parseErr.Error())
 			return
 		}
+
+		if h.authService != nil {
+			user, err := h.authenticate(r)
+			if err != nil {
+				handleErrorWithCode(w, err, http.StatusUnauthorized)
+				return
+			}
+
+			// Check privileges for all statements first.
+			for _, stmt := range q.Statements {
+				if !h.authService.HasAdmin() {
+					if s, firstUser := stmt.(*influxql.CreateUserStatement); firstUser && s.Admin {
+						// If the first statement creates the first admin user, we skip checking privileges.
+						break
+					}
+				}
+				privileges, _ := stmt.RequiredPrivileges()
+				if user == nil || !isAllowed(privileges, *user, db) {
+					jsonError(w, http.StatusForbidden, "forbidden statement: "+stmt.String())
+					return
+				}
+			}
+
+		}
+
 		for _, stmt := range q.Statements {
+			if err := HandleAdminStatement(stmt, h.authService); err != nil {
+				handleBadRequestError(w, err)
+				return
+			}
+
 			switch s := stmt.(type) {
 			case *influxql.CreateContinuousQueryStatement,
 				*influxql.CreateDatabaseStatement,
 				*influxql.CreateRetentionPolicyStatement,
 				*influxql.CreateSubscriptionStatement,
-				*influxql.CreateUserStatement,
 				*influxql.DropContinuousQueryStatement,
 				*influxql.DropDatabaseStatement,
 				*influxql.DropMeasurementStatement,
 				*influxql.DropRetentionPolicyStatement,
-				*influxql.DropSubscriptionStatement,
-				*influxql.DropUserStatement,
-				*influxql.GrantStatement,
-				*influxql.GrantAdminStatement,
-				*influxql.RevokeStatement,
-				*influxql.RevokeAdminStatement,
-				*influxql.SetPasswordUserStatement,
+				*influxql.DropSubscriptionStatement, // Need to figure out how to handle subscriptions with replication
+
 				// Deletes could be multi-casted
 				*influxql.DeleteSeriesStatement,
 				*influxql.DeleteStatement,
 				*influxql.DropSeriesStatement:
-				// Send the statement to every replica in every replicaset.
-				// TODO Keep track of failed queries.
-				log.Print("Broadcasting: " + s.String())
-
 				// TODO Ping all replicas to make sure they are reachable before making a meta query.
-				// ..return an error if not.
-				// TODO In case one request fails, store in a log in peristent storage so that the command
-				// can be replayed in order
+				// TODO In case one request fails, store in a log in peristent storage so that the command can be replayed in order
 				for _, location := range h.resolver.FindAll() {
 					results, err, res := request(s.String(), location, h.client, r)
 					if err != nil {
 						// We may want to handle errors differently
 						// Eg. with a retry,
-						passBack(&w, res)
+						passBack(w, res)
 						return
 					}
 					// Maybe only send one of the results.
@@ -204,7 +293,7 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					// return an error.
 					results, err, res := request(s.String(), location, h.client, r)
 					if ri == len(all)-1 && err != nil {
-						passBack(&w, res)
+						passBack(w, res)
 						continue
 					}
 					allResults = append(allResults, results...)
@@ -216,8 +305,6 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				*influxql.ShowTagValuesStatement,
 				*influxql.ShowQueriesStatement:
 
-				// Send to all replicasets, any replica, merge returned values
-
 				// TODO refactor to reuse same logic as the one above
 				// TODO implement merging of results
 
@@ -227,7 +314,7 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					// return an error.
 					results, err, res := request(s.String(), location, h.client, r)
 					if ri == len(all)-1 && err != nil {
-						passBack(&w, res)
+						passBack(w, res)
 						continue
 					}
 					allResults = append(allResults, results...)
@@ -235,21 +322,12 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 
 			case *influxql.SelectStatement:
-				log.Print("Sharding query: " + s.String())
-
-				// TODO Find the chunk based on a shard key matching the query Option.
-				// TODO Get the replicaset hosts of the shard holding that shard
-				// TODO Select one of those hosts and pass on the query.
-
-				/*all := h.resolver.FindAll()
-				location := all[rand.Intn(len(all))]
-				results, err, res := request(s, location, h.client, r)*/
 
 				c := &Coordinator{h.resolver, h.partitioner}
 				results, err, res := c.Handle(s, r, db)
 				if err != nil {
 					log.Println(err)
-					passBack(&w, res)
+					passBack(w, res)
 					continue
 				}
 				allResults = append(allResults, results...)
@@ -264,13 +342,24 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// then partial series can either be merged into one or just flushed individually.
 			}
 		}
+
+		if _, ok := h.authService.(*PersistentAuthService); ok {
+			err := h.authService.(*PersistentAuthService).Save()
+			handleInternalError(w, err)
+			return
+		}
+
 		// TODO replace with a custom ResultFlusher that can either save all
 		// results in memory and flushes in the end, or flushes every chunk received.
+		respondWithResults(w, allResults)
+
+
+		/*
 		if len(allResults) > 0 {
 			respondWithResults(w, allResults)
 			return
 		}
-		// This is the default handler.
+		// This is the default handler. It should never be used.
 		all := h.resolver.FindAll()
 		log.Printf("Resolver found the following servers: %s", strings.Join(all, ", "))
 		location := all[rand.Intn(len(all))]
@@ -279,7 +368,7 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		baseUrl.RawQuery = r.URL.Query().Encode()
 		res, err := h.client.Post(baseUrl.String(), "", r.Body)
 		handleRouteError("query", err)
-		passBack(&w, res)
+		passBack(w, res)*/
 	}
 
 }

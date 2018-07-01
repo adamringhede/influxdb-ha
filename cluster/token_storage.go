@@ -17,10 +17,10 @@ import (
 const maxToken = 2147483647
 
 type TokenStorage interface {
-	Assign()
-	Get()
-	Reserve()
-	Release()
+	Assign(token int, node string) error
+	Get() (map[int]string, error)
+	Reserve(token int, node string) (bool, error)
+	Release(token int) error
 }
 
 const etcdStorageTokens = "tokens"
@@ -74,7 +74,7 @@ func (s *EtcdTokenStorage) SuggestReservations() ([]int, error) {
 	return suggestions, nil
 }
 
-// Assign sets a token to refer to a certain node
+// Assign sets a token to refer to a certain node id
 func (s *EtcdTokenStorage) Assign(token int, node string) error {
 	_, err := s.Client.Put(context.Background(), s.tokenPath(token, etcdStorageTokens), node)
 	return err

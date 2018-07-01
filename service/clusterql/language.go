@@ -64,7 +64,7 @@ func CreateLanguage() *Language {
 	// Removing a node will redistribute tokens. Those nodes should then start to importing data just as
 	// if they joined the cluster initially.
 
-	// BACKUP * TO s3://my-bucket/
+	// BACKUP * TO s3://my-bucket/ (requires aws keys to be setup on every node)
 	return lang
 }
 

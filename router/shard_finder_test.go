@@ -1,7 +1,7 @@
 package router
 
 import (
-	"github.com/influxdata/influxdb/influxql"
+	"github.com/influxdata/influxql"
 	"log"
 	"testing"
 	"github.com/davecgh/go-spew/spew"

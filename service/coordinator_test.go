@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/adamringhede/influxdb-ha/service/merge"
-	"github.com/influxdata/influxdb/influxql"
+	"github.com/influxdata/influxql"
 	"github.com/influxdata/influxdb/models"
 	"github.com/stretchr/testify/assert"
 )

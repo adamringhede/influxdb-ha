@@ -3,15 +3,15 @@ package service
 import (
 	"fmt"
 	"log"
-	"math/rand"
-	"net/http"
+		"net/http"
 	"strings"
 	"time"
 
 	"github.com/adamringhede/influxdb-ha/cluster"
 	"github.com/adamringhede/influxdb-ha/service/merge"
-	"github.com/influxdata/influxdb/influxql"
+	"github.com/influxdata/influxql"
 	"github.com/influxdata/influxdb/models"
+	"github.com/adamringhede/influxdb-ha/hash"
 )
 
 // Coordinator handles a SELECT query using partition keys and a resolver.
@@ -190,7 +190,7 @@ func (c *Coordinator) Handle(stmt *influxql.SelectStatement, r *http.Request, db
 				groupedResults := groupResultsByTags(allResults)
 				precision := r.URL.Query().Get("precision")
 				var less compareLess
-				if strings.ToLower(precision) == "rfc3339" {
+				if precision == "" || strings.ToUpper(precision) == "RFC3339" {
 					less = lessRfc
 				} else {
 					less = lessFloat
@@ -215,18 +215,25 @@ func (c *Coordinator) Handle(stmt *influxql.SelectStatement, r *http.Request, db
 				return mergedResults, nil, response
 			}
 		} else {
+			// Request single nodes
 			locations = c.resolver.FindByKey(hashes[0], cluster.READ)
-			log.Printf("Sharding found single locations %s", strings.Join(locations, ", "))
-			selectedLocation := locations[rand.Intn(len(locations))]
-			return request(stmt.String(), selectedLocation, client, r)
+			return requestMultipleLocations(stmt.String(), locations, client, r)
 		}
 	} else {
-		// TODO measurements without a partition key should be hashed to a certain token based on the measurement name #152176896
-		log.Printf("[Coordinator] Measurement %s - %s does not have a partition key. Selecting any node.", msmt.Database, msmt.Name)
-		locations = c.resolver.FindAll()
-		selectedLocation := locations[rand.Intn(len(locations))]
-		log.Printf("Selecting location %s", selectedLocation)
-		return request(stmt.String(), selectedLocation, client, r)
+		// Resolve based on database name
+		key := hash.String(cluster.CreatePartitionKeyIdentifier(db, ""))
+		locations := c.resolver.FindByKey(int(key), cluster.READ)
+		return requestMultipleLocations(stmt.String(), locations, client, r)
+	}
+	return []Result{}, nil, nil
+}
+
+func requestMultipleLocations(stmt string, locations []string, client *http.Client, r *http.Request) ([]Result, error, *http.Response) {
+	for _, location := range locations {
+		results, err, res := request(stmt, location, client, r)
+		if err == nil {
+			return results, err, res
+		}
 	}
 	return []Result{}, nil, nil
 }

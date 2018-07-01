@@ -53,6 +53,8 @@ func (s *EtcdHintStorage) Watch() clientv3.WatchChan {
 	return s.Client.Watch(context.Background(), s.path(etcdStorageHints), clientv3.WithPrefix())
 }
 
+// TODO If the etcd cluster is not available, it needs to retry over and over again
+// until it works or the node will not be aware that the data exist.
 func (s *EtcdHintStorage) Put(target string, status HintStatus) error {
 	if !s.Local[target] {
 		s.Local[target] = true

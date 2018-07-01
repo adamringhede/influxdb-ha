@@ -2,6 +2,7 @@ package merge
 
 import (
 	"strconv"
+	"math"
 )
 
 type Values struct {
@@ -13,7 +14,15 @@ func (n *Values) Next(source ResultSource) []float64 {
 }
 
 type MovingAverage struct {
+	values *Values
+	counts *Values
+}
 
+func NewMovingAverage(fieldKey string, n int, qb *QueryBuilder) *MovingAverage {
+	return &MovingAverage{
+		qb.Get("moving_average(" + fieldKey + ", " + strconv.Itoa(n) + ")"),
+		qb.Get("count(" + fieldKey + ")"),
+	}
 }
 
 func (n *MovingAverage) Next() []float64 {
@@ -90,13 +99,13 @@ func NewSpread(fieldKey string, qb *QueryBuilder) *Spread {
 }
 
 func (n *Spread) Next(source ResultSource) []float64 {
-	var max float64
+	var max = -math.MaxFloat64
 	for _, v := range n.maxs.Next(source) {
 		if v > max {
 			max = v
 		}
 	}
-	var min float64
+	var min = math.MaxFloat64
 	for _, v := range n.mins.Next(source) {
 		if v < min {
 			max = v
@@ -122,7 +131,7 @@ func (n *Distinct) Next(source ResultSource) []float64 {
 	}
 	distinct := make([]float64, len(unique))
 	for v := range unique {
-		distinct = append(distinct, v)
+		distinct = append(distinct, v) // FIXME Don't use append as the result will be longer then len(unique)
 	}
 	return distinct
 }

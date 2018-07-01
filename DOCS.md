@@ -114,9 +114,12 @@ The guidelines for single nodes given by the official InfluxDB docuentations can
 There are two main ways of upgrading the storage capacity which should work regardless of your infrastructure. 
 
 The first, which is commonly used for database deployments, is to stop the node, attach a new larger volume, copy the data to it from the old one and then start it.
-Data that was to be written to it while it was down will be recovered after starting the node. 
+Data that was to be written to it while it was down will be recovered after starting the node.
+Note that this implementation distributes data evenly; so to increase storage capacity, all nodes need to be upgraded  
 
-The second, which does not require stopping any node and may be more appropriate if I/O rate is a bottleneck **[TODO Write about adding more nodes than configured replication factor or decreasing the replication factor.]** 
+The second, which does not require stopping any node and may be more appropriate if I/O rate is a bottleneck  is
+to add one or more nodes. 
+If you have more nodes than the configured replication factor, data will be distributed evenly as another node is added.
 
 ### Recovery data storage 
 The cluster agent process need access to additional persistent storage for recovery data. The amount required depends on the volumes of points written when a node is unavailable and how fast it can be recovered which depends on disk io.    
@@ -127,7 +130,7 @@ The cluster agent process need access to additional persistent storage for recov
 The query is distributed to nodes and results are then merged and sorted to give the impression that the request was made to a single node.  
 
 ### Query to multiple partitions with aggregations
-Aggregations make it a lot more complicated. The query is first decompiled and a custom AST (abstract syntax tree) is created that is then
+Aggregations make it a lot more complicated but is possible and will be completely automatic. The query is first decompiled and an abstract syntax tree (AST) is created that is then
 used to perform the aggregation from results from the nodes. 
 
 ## Limitations

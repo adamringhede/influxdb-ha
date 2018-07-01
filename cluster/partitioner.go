@@ -18,7 +18,6 @@ const PartitionTagName = "_partitionToken"
 // changed by an administrator while the server is running.
 type Partitioner interface {
 	GetHashes(key PartitionKey, tags map[string][]string) []int
-	GetHash(key PartitionKey, tags map[string][]string) (int, error)
 	// FulfillsKey checks if the given values are enough for the given partition key
 	FulfillsKey(key PartitionKey, values map[string][]string) bool
 	AddKey(key PartitionKey)
@@ -32,11 +31,12 @@ type PartitionKeyCollection interface {
 }
 
 type BasicPartitioner struct {
+	Partitioner
 	partitionKeys map[string]PartitionKey
 }
 
 func NewPartitioner() *BasicPartitioner {
-	return &BasicPartitioner{make(map[string]PartitionKey)}
+	return &BasicPartitioner{partitionKeys: make(map[string]PartitionKey)}
 }
 
 func (p *BasicPartitioner) GetPartitionKeys() []PartitionKey {

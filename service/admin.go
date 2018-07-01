@@ -8,6 +8,7 @@ import (
 	"github.com/adamringhede/influxdb-ha/cluster"
 	"github.com/adamringhede/influxdb-ha/service/clusterql"
 	"github.com/influxdata/influxdb/models"
+	"fmt"
 )
 
 var clusterLanguage = clusterql.CreateLanguage()
@@ -15,7 +16,7 @@ var clusterLanguage = clusterql.CreateLanguage()
 func isAdminQuery(queryParam string) bool {
 	matched, err := regexp.MatchString("(REMOVE|SHOW|DROP|CREATE|SET)\\s+(NODES|NODE|PARTITION|REPLICATION)", strings.ToUpper(queryParam))
 	if err != nil {
-		panic(err)
+		fmt.Printf("Warning: Rexexp error on query: %s\n", err.Error())
 	}
 	return matched
 }
