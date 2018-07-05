@@ -24,10 +24,17 @@ func isAdminQuery(queryParam string) bool {
 type ClusterHandler struct {
 	partitionKeyStorage cluster.PartitionKeyStorage
 	nodeStorage         cluster.NodeStorage
+	authService			AuthService
 }
 
 func (h *ClusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	queryParam := r.URL.Query().Get("q")
+
+	user, err := authenticate(r, h.authService)
+	if err != nil {
+		handleErrorWithCode(w, err, http.StatusUnauthorized)
+		return
+	}
 
 	// TODO add support for multiple statements in single query
 	// TODO support using both influxdb statements and cluster statements in same query
@@ -37,6 +44,12 @@ func (h *ClusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "error parsing query: "+err.Error())
 		return
 	}
+
+	if !user.AuthorizeClusterOperation() {
+		jsonError(w, http.StatusForbidden, "forbidden cluster statement")
+		return
+	}
+
 	switch stmt.(type) {
 	case clusterql.ShowPartitionKeysStatement:
 		keys, err := h.partitionKeyStorage.GetAll()
@@ -79,7 +92,7 @@ func (h *ClusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case clusterql.RemoveNodeStatement:
 		name := stmt.(clusterql.RemoveNodeStatement).Name
 		ok, err := h.nodeStorage.Remove(name)
-		// TODO distribute tokens to other clients and have them start importing data.
+		// TODO Admins need a way of monitoring the state of imports happening.
 		handleInternalError(w, err)
 		if !ok {
 			jsonError(w, http.StatusNotFound, "could not find node with name \""+name+"\"")

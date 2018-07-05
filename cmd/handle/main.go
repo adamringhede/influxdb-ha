@@ -82,7 +82,7 @@ func main() {
 		}
 	}
 
-	defaultReplicationFactor, err := settingsStorage.GetDefaultReplicationFactor()
+	defaultReplicationFactor, err := settingsStorage.GetDefaultReplicationFactor(2)
 	handleErr(err)
 
 	resolver := cluster.NewResolverWithNodes(nodeCollection)

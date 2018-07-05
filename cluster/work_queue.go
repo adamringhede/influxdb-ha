@@ -8,6 +8,7 @@ import (
 	"github.com/coreos/etcd/clientv3/concurrency"
 	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/satori/go.uuid"
+	"strings"
 )
 
 // Task is a stateful representation of work that should be performed
@@ -27,6 +28,12 @@ type TaskData struct {
 	ID string `json:"ID"`
 	Checkpoint json.RawMessage `json:"Checkpoint"`
 	Payload json.RawMessage `json:"Payload"`
+}
+
+type TaskInfo struct {
+	Type string
+	Target string
+	TaskData TaskData
 }
 
 func (task *TaskData) Unmarshal(payload interface{}, checkpoint interface{}) (err error) {
@@ -107,6 +114,23 @@ func NewEtcdWorkQueue(c *clientv3.Client, target, workType string) *EtcdWorkQueu
 	return s
 }
 
+func (wq *EtcdWorkQueue) List() (out []TaskInfo, err error) {
+	resp, err := wq.Client.Get(context.Background(), wq.pendingPath(), clientv3.WithPrefix())
+	if err != nil {
+		return
+	}
+	for _, kv := range resp.Kvs {
+		task := wq.unmarshal(kv.Value)
+		keyParts := strings.Split(string(kv.Key), "/")
+		out = append(out, TaskInfo{
+			Type:     keyParts[len(keyParts)-3],
+			Target:    keyParts[len(keyParts)-2],
+			TaskData: task,
+		})
+	}
+	return
+}
+
 func (wq *EtcdWorkQueue) Push(target string, payload interface{}) {
 	id := uuid.NewV4().String()
 	task := Task{ID: id, Payload: payload}
@@ -135,8 +159,12 @@ func (wq *EtcdWorkQueue) unlock() {
 	}
 }
 
+func (wq *EtcdWorkQueue) pendingPath() string {
+	return wq.path("tasks", "pending", wq.Type)
+}
+
 func (wq *EtcdWorkQueue) targetPath(target string) string {
-	return wq.path("tasks/pending/" + wq.Type + "/" + target)
+	return wq.path("tasks", "pending/", wq.Type, target)
 }
 
 func (wq *EtcdWorkQueue) targetPathId(target, id string) string {

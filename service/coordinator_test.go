@@ -86,19 +86,19 @@ func Test_mergeResults(t *testing.T) {
 
 	a := Result{Series: []*models.Row{
 		{
-			Columns: []string{"time", "sum_value_", "top_value__1_", "mean_value_", "count_value_"},
+			Columns: []string{"time", "sum_value_", "top_value__1_", "mean_value_", "count_value_", "moving_average_value__1_"},
 			Values: [][]interface{}{
-				{"1970-01-01T00:00:00Z", 5.0, 5.0, 5.0, 1},
-				{"1970-01-02T00:00:00Z", 8.0, 8.0, 8.0, 1},
+				{"1970-01-01T00:00:00Z", 5.0, 5.0, 5.0, 1, 5.0},
+				{"1970-01-02T00:00:00Z", 8.0, 8.0, 8.0, 1, 8.0},
 			}},
 	}}
 
 	b := Result{Series: []*models.Row{
 		{
-			Columns: []string{"time", "sum_value_", "top_value__1_", "mean_value_", "count_value_"},
+			Columns: []string{"time", "sum_value_", "top_value__1_", "mean_value_", "count_value_", "moving_average_value__1_"},
 			Values: [][]interface{}{
-				{"1970-01-01T00:00:00Z", 3.0, 3.0, 3.0, 1},
-				{"1970-01-02T00:00:00Z", 12.0, 12.0, 12.0, 1},
+				{"1970-01-01T00:00:00Z", 3.0, 3.0, 3.0, 1, 3.0},
+				{"1970-01-02T00:00:00Z", 12.0, 12.0, 12.0, 1, 12.0},
 			}},
 	}}
 
@@ -123,6 +123,11 @@ func Test_mergeResults(t *testing.T) {
 	assert.Equal(t, []float64{20}, tree.Fields[2].Root.Next(source))
 	assert.Equal(t, []float64{30}, tree.Fields[3].Root.Next(source))
 	source.Reset()
+
+	stmt = mustGetSelect(`SELECT moving_average("value", 1) FROM sales where time < now() group by time(1d) `)
+	tree, _, err = merge.NewQueryTree(stmt)
+	assert.NoError(t, err)
+	assert.Equal(t, []float64{4}, tree.Fields[0].Root.Next(source))
 }
 
 func mustGetSelect(q string) *influxql.SelectStatement {

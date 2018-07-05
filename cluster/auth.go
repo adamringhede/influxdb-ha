@@ -41,6 +41,10 @@ type UserInfo struct {
 	Privileges map[string]influxql.Privilege
 }
 
+func (u *UserInfo) AuthorizeClusterOperation() bool {
+	return u.Admin
+}
+
 func NewUser(name, hash string, admin bool) UserInfo {
 	return UserInfo{Name: name, Admin: admin, Hash: hash, Privileges: map[string]influxql.Privilege{}}
 }

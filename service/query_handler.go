@@ -13,8 +13,7 @@ import (
 	"github.com/influxdata/influxql"
 	"github.com/influxdata/influxdb/models"
 	"github.com/influxdata/influxdb/services/meta"
-	"golang.org/x/crypto/bcrypt"
-)
+	)
 
 // Message represents a user-facing Message to be included with the Result.
 type Message struct {
@@ -129,24 +128,6 @@ type QueryHandler struct {
 	authService    AuthService
 }
 
-func (h *QueryHandler) authenticate(r *http.Request) (*cluster.UserInfo, error) {
-	if r.URL.User != nil && r.URL.User.Username() != "" {
-		user := h.authService.User(r.URL.User.Username())
-		if user == nil {
-			return nil, meta.ErrAuthenticate
-		}
-		password, _ := r.URL.User.Password()
-		if bcrypt.CompareHashAndPassword([]byte(user.Hash), []byte(password)) != nil {
-			return nil, meta.ErrAuthenticate
-		}
-		return user, nil
-	}
-	if h.authService.HasAdmin() {
-		return nil, meta.ErrAuthenticate
-	}
-	return nil, nil
-}
-
 func updateUser(user string, authService AuthService, updater func(info *cluster.UserInfo)) error {
 	u := authService.User(user)
 	if u == nil {
@@ -157,7 +138,7 @@ func updateUser(user string, authService AuthService, updater func(info *cluster
 	}
 }
 
-func HandleAdminStatement(stmt influxql.Statement, authService AuthService) (err error) {
+func HandleAuthStatement(stmt influxql.Statement, authService AuthService) (err error) {
 	switch s := stmt.(type) {
 	case
 		*influxql.CreateUserStatement:
@@ -209,7 +190,7 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if h.authService != nil {
-			user, err := h.authenticate(r)
+			user, err := authenticate(r, h.authService)
 			if err != nil {
 				handleErrorWithCode(w, err, http.StatusUnauthorized)
 				return
@@ -233,7 +214,7 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, stmt := range q.Statements {
-			if err := HandleAdminStatement(stmt, h.authService); err != nil {
+			if err := HandleAuthStatement(stmt, h.authService); err != nil {
 				handleBadRequestError(w, err)
 				return
 			}

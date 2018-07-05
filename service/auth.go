@@ -5,6 +5,8 @@ import (
 	"time"
 	"github.com/influxdata/influxdb/services/meta"
 	"github.com/influxdata/influxql"
+	"net/http"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthService interface {
@@ -16,6 +18,24 @@ type AuthService interface {
 	SetPrivilege(name, database string, p influxql.Privilege) error
 	RemovePrivilege(name, database string) error
 	HasAdmin() bool
+}
+
+func authenticate(r *http.Request, authService AuthService) (*cluster.UserInfo, error) {
+	if r.URL.User != nil && r.URL.User.Username() != "" {
+		user := authService.User(r.URL.User.Username())
+		if user == nil {
+			return nil, meta.ErrAuthenticate
+		}
+		password, _ := r.URL.User.Password()
+		if bcrypt.CompareHashAndPassword([]byte(user.Hash), []byte(password)) != nil {
+			return nil, meta.ErrAuthenticate
+		}
+		return user, nil
+	}
+	if authService.HasAdmin() {
+		return nil, meta.ErrAuthenticate
+	}
+	return nil, nil
 }
 
 func isAllowed(privileges influxql.ExecutionPrivileges, user cluster.UserInfo, db string) bool {

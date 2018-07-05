@@ -31,7 +31,7 @@ func Start(
 	// manually setting up the password on each node.
 
 	http.Handle("/", &QueryHandler{client, resolver, partitioner, ch, auth})
-	http.Handle("/write", &WriteHandler{client, resolver, partitioner, recovery})
+	http.Handle("/write", &WriteHandler{client, resolver, partitioner, recovery, auth})
 
 	log.Println("Listening on " + addr)
 	err := http.ListenAndServe(addr, nil)

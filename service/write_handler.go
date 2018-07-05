@@ -14,6 +14,7 @@ import (
 	"github.com/adamringhede/influxdb-ha/cluster"
 	"github.com/influxdata/influxdb-relay/relay"
 	"github.com/influxdata/influxdb/models"
+	"github.com/influxdata/influxql"
 )
 
 type WriteHandler struct {
@@ -21,15 +22,22 @@ type WriteHandler struct {
 	resolver        *cluster.Resolver
 	partitioner     cluster.Partitioner
 	recoveryStorage cluster.RecoveryStorage
+	authService     AuthService
 }
 
-func NewWriteHandler(resolver *cluster.Resolver, partitioner cluster.Partitioner, rs cluster.RecoveryStorage) *WriteHandler {
+func NewWriteHandler(resolver *cluster.Resolver, partitioner cluster.Partitioner, rs cluster.RecoveryStorage, authService AuthService) *WriteHandler {
 	client := &http.Client{Timeout: 10 * time.Second}
-	return &WriteHandler{client, resolver, partitioner, rs}
+	return &WriteHandler{client, resolver, partitioner, rs, authService}
 }
 
 func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Received request %s?%s\n", r.URL.Path, r.URL.RawQuery)
+
+	user, err := authenticate(r, h.authService)
+	if err != nil {
+		handleErrorWithCode(w, err, http.StatusUnauthorized)
+		return
+	}
 
 	buf, err := ioutil.ReadAll(r.Body)
 	points, err := models.ParsePoints(buf)
@@ -51,6 +59,18 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	precision := query.Get("precision")
 	if precision == "" {
 		precision = "nanoseconds"
+	}
+
+
+	if !user.AuthorizeDatabase(influxql.WritePrivilege, db) {
+		jsonError(w, http.StatusForbidden, "forbidden to write to database: " + db) // TODO Get the corret error message
+		return
+	}
+	for _, point := range points {
+		if !user.AuthorizeSeriesWrite(db, point.Name(), point.Tags()) {
+			jsonError(w, http.StatusForbidden, "forbidden to write to measurement" + db + "." + string(point.Name()))
+			return
+		}
 	}
 
 	pointGroups := make(map[int][]models.Point)

@@ -146,6 +146,9 @@ func createQueryNode(expr influxql.Expr, qb *QueryBuilder) (QueryNode, error) {
 			n = NewMode(f.Args[0].String(), qb)
 		case "count":
 			n = NewCount(f.Args[0].String(), qb)
+		case "moving_average":
+			width, _ := strconv.Atoi(f.Args[1].String())
+			n = NewMovingAverage(f.Args[0].String(), width, qb)
 		default:
 			/*
 				Not supported:

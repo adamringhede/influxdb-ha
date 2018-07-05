@@ -25,9 +25,18 @@ func NewMovingAverage(fieldKey string, n int, qb *QueryBuilder) *MovingAverage {
 	}
 }
 
-func (n *MovingAverage) Next() []float64 {
-	// get raw results and just do a weighted mean of them.
-	return []float64{}
+func (n *MovingAverage) Next(source ResultSource) []float64 {
+	values := n.values.Next(source)
+	counts := n.counts.Next(source)
+	var totalSum float64
+	var totalCount float64
+	for i, value := range values {
+		if counts[i] > 0 {
+			totalSum += value * counts[i]
+			totalCount += counts[i]
+		}
+	}
+	return []float64{totalSum / totalCount}
 }
 
 type Top struct {

@@ -56,13 +56,13 @@ func (s* EtcdSettingsStorage) watchKey(key string) chan string {
 	return updates
 }
 
-func (s *EtcdSettingsStorage) GetDefaultReplicationFactor() (int, error) {
+func (s *EtcdSettingsStorage) GetDefaultReplicationFactor(fallback int) (int, error) {
 	resp, err := s.Client.Get(context.Background(), s.path(etcdStorageSettings) + "rf_default")
 	if err != nil {
-		return 0, err
+		return fallback, err
 	}
 	if resp.Count == 0 {
-		return 2, nil
+		return fallback, nil
 	}
 	return strconv.Atoi(string(resp.Kvs[0].Value))
 }
