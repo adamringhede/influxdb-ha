@@ -49,7 +49,7 @@ func (r *Resolver) FindNodesByKey(key int, purpose ResolvePurpose) []*Node {
 		// Getting node from the nodes collection instead as the one in the
 		// partition may be out of date.
 		node, nodeExists := r.nodes.Get(p.Node.Name)
-		if nodeExists && purpose == READ && node.Status == NodeStatusRecovering {
+		if nodeExists && purpose == READ && node.Status != NodeStatusUp {
 			// If a token is assigned to a node
 			continue
 		}

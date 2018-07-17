@@ -60,7 +60,7 @@ func main() {
 
 	localNode, nodeErr := nodeStorage.Get(nodeName)
 	handleErr(nodeErr)
-	isNew := localNode == nil
+	isNew := localNode == nil || localNode.Status == cluster.NodeStatusJoining
 	if localNode == nil {
 		localNode = &cluster.Node{}
 		localNode.Name = nodeName
@@ -167,28 +167,27 @@ func main() {
 	if isNew {
 		mtx, err := tokenStorage.Lock()
 		handleErr(err)
-		isFirstNode, err := tokenStorage.InitMany(localNode.Name, 16)
+		isFirstNode, err := tokenStorage.InitMany(localNode.Name, 16) // this may have failed for the first node.
 		if err != nil {
 			log.Println("Intitation of tokens failed")
 			handleErr(err)
 		}
 		if !isFirstNode {
 			log.Println("Joining existing cluster")
-			// Setting the status to recovering will prevent writes.
-			localNode.Status = cluster.NodeStatusRecovering
+			localNode.Status = cluster.NodeStatusJoining
 			nodeStorage.Save(localNode)
 
 			err = join(localNode, tokenStorage, resolver, importer)
 			handleErr(err)
-
-			localNode.Status = cluster.NodeStatusUp
-			err = nodeStorage.Save(localNode)
-			// If this fails, the node will be stuck in the wrong state unable to receive writes
-			handleErr(err)
 		}
+		localNode.Status = cluster.NodeStatusUp
+		err = nodeStorage.Save(localNode)
+		// If this fails, the node will be stuck in the wrong state unable to receive writes
+		panic(err)
 		mtx.Unlock(context.Background())
 	} else {
-		// TODO check if importing data from initial sync or from a node being deleted, if so, then resume.
+		// TODO check if importing data from initial sync or from a node being deleted, if so, then resume import.
+		// This should not be needed if we used reliable imports. However, there is still a possiblity that it did not successfully join for some reason and we need to clean up and restart.
 	}
 
 	// Sleep forever
@@ -203,6 +202,7 @@ func tokensToString(tokens []int, sep string) string {
 	return strings.Join(res, sep)
 }
 
+// join takes tokens belonging to other nodes and starts importing data. This function is idempotent and can be called on multiple
 func join(localNode *cluster.Node, tokenStorage *cluster.EtcdTokenStorage, resolver *cluster.Resolver, importer syncing.Importer) error {
 	toSteal, err := tokenStorage.SuggestReservations()
 	log.Printf("Stealing %d tokens: [%s]", len(toSteal), tokensToString(toSteal, " "))
@@ -210,7 +210,7 @@ func join(localNode *cluster.Node, tokenStorage *cluster.EtcdTokenStorage, resol
 		return err
 	}
 	handleErr(err)
-	reserved := []int{}
+	var reserved []int
 	for _, tokenToSteal := range toSteal {
 
 		ok, err := tokenStorage.Reserve(tokenToSteal, localNode.Name)
@@ -220,7 +220,6 @@ func join(localNode *cluster.Node, tokenStorage *cluster.EtcdTokenStorage, resol
 		if ok {
 			reserved = append(reserved, tokenToSteal)
 		}
-		// TODO handle not ok
 	}
 
 	log.Println("Starting import of primary data")

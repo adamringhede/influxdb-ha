@@ -168,11 +168,6 @@ func (e errAlreadyInitiated) Error() string { return "Already initiated" }
 
 func (s *EtcdTokenStorage) InitMany(node string, numRanges int) (bool, error) {
 	initKey := s.path("initiated")
-	//mtx, lockErr := s.Lock()
-	//if lockErr != nil {
-	//	return false, lockErr
-	//}
-	//defer mtx.Unlock(context.Background())
 	_, err := concurrency.NewSTM(s.Client, func(stm concurrency.STM) error {
 		initiated := stm.Get(initKey)
 		if initiated == "true" {
@@ -193,11 +188,11 @@ func (s *EtcdTokenStorage) InitMany(node string, numRanges int) (bool, error) {
 		return nil
 	})
 	if err != nil {
-		switch e := err.(type) {
+		switch err.(type) {
 		case errAlreadyInitiated:
 			return false, nil
 		default:
-			return false, e
+			return false, err
 		}
 	}
 	log.Println("Initiating tokens")

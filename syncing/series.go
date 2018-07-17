@@ -29,14 +29,14 @@ func NewSeriesFromKey(key string) (series Series) {
 
 func (s Series) Where() string {
 	var result []string
-	for key, value := range s.Tags {
+	for key, value := range s.Tags { // TODO create a version of this that only includes the tags in a partition key.
 		result = append(result, fmt.Sprintf("%s='%s'", key, value[0]))
 	}
 	return strings.Join(result, " AND ")
 }
 
 func (s Series) Matches(token int, pk cluster.PartitionKey, resolver *cluster.Resolver) bool {
-	hash, err := cluster.GetHash(pk, s.Tags)
+	hash, err := cluster.GetHash(pk, s.filterTagsByPartitionKey(pk))
 	if err != nil{
 		return false
 	}
@@ -45,6 +45,15 @@ func (s Series) Matches(token int, pk cluster.PartitionKey, resolver *cluster.Re
 		return false
 	}
 	return resolvedToken == token
+}
+
+func (s Series) filterTagsByPartitionKey(pk cluster.PartitionKey) (result map[string][]string) {
+	for _, tag := range pk.Tags {
+		if tagValue, hasTag := s.Tags[tag]; hasTag {
+			result[tag] = tagValue
+		}
+	}
+	return
 }
 
 func FetchSeries(location string, db string) (series []Series, err error) {
