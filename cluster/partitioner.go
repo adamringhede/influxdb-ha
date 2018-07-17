@@ -85,6 +85,7 @@ func GetHash(key PartitionKey, tags map[string][]string) (int, error) {
 		if values, ok := tags[tag]; ok {
 			/*
 				If there are multiple values, multiple hashes need to be returned for every possible combination.
+				This is because we don't try to figure out, what could be complex, logical relationships between tags.
 				This requires that the query coordinator makes the request to multiple nodes and then merges the
 				results.
 			*/
