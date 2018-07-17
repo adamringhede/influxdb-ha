@@ -2,11 +2,11 @@ package service
 
 import (
 	"github.com/adamringhede/influxdb-ha/cluster"
-	"time"
 	"github.com/influxdata/influxdb/services/meta"
 	"github.com/influxdata/influxql"
-	"net/http"
 	"golang.org/x/crypto/bcrypt"
+	"net/http"
+	"time"
 )
 
 type AuthService interface {
@@ -52,8 +52,8 @@ func isAllowed(privileges influxql.ExecutionPrivileges, user cluster.UserInfo, d
 
 type PersistentAuthService struct {
 	storage cluster.AuthStorage
-	auth cluster.AuthData
-	dirty bool
+	auth    cluster.AuthData
+	dirty   bool
 }
 
 func (service *PersistentAuthService) HasAdmin() bool {
@@ -104,7 +104,6 @@ func (service *PersistentAuthService) CreateUser(user cluster.UserInfo) error {
 	service.dirty = true
 	return nil
 }
-
 
 func (service *PersistentAuthService) UpdateUser(user cluster.UserInfo) error {
 	if user.Name == "" {
@@ -178,7 +177,7 @@ func (service *PersistentAuthService) Sync() (closer chan struct{}) { // change 
 	service.refresh()
 	go (func() {
 		for {
-			select  {
+			select {
 			case auth := <-ch:
 				if !service.dirty {
 					service.auth = auth
@@ -195,4 +194,47 @@ func (service *PersistentAuthService) Sync() (closer chan struct{}) { // change 
 		}
 	})()
 	return
+}
+
+func HandleAuthStatement(stmt influxql.Statement, authService AuthService) (err error) {
+	switch s := stmt.(type) {
+	case
+		*influxql.CreateUserStatement:
+		err = authService.CreateUser(cluster.NewUser(s.Name, cluster.HashUserPassword(s.Password), s.Admin))
+	case
+		*influxql.DropUserStatement:
+		err = authService.DeleteUser(s.Name)
+	case
+		*influxql.GrantStatement:
+		err = authService.SetPrivilege(s.User, s.DefaultDatabase(), s.Privilege)
+	case
+		*influxql.GrantAdminStatement:
+		err = updateUser(s.User, authService, func(u *cluster.UserInfo) {
+			u.Admin = true
+		})
+	case
+		*influxql.RevokeStatement:
+		err = authService.RemovePrivilege(s.User, s.DefaultDatabase())
+	case
+		*influxql.RevokeAdminStatement:
+		err = updateUser(s.User, authService, func(u *cluster.UserInfo) {
+			u.Admin = false
+		})
+	case
+		*influxql.SetPasswordUserStatement:
+		err = updateUser(s.Name, authService, func(u *cluster.UserInfo) {
+			u.Hash = cluster.HashUserPassword(s.Password)
+		})
+	}
+	return
+}
+
+func updateUser(user string, authService AuthService, updater func(info *cluster.UserInfo)) error {
+	u := authService.User(user)
+	if u == nil {
+		return meta.ErrUserNotFound
+	} else {
+		updater(u)
+		return authService.UpdateUser(*u)
+	}
 }

@@ -1,10 +1,9 @@
 package service
 
 import (
-		"github.com/adamringhede/influxdb-ha/cluster"
-		influx "github.com/influxdata/influxdb/client/v2"
+	"github.com/adamringhede/influxdb-ha/cluster"
+	influx "github.com/influxdata/influxdb/client/v2"
 	"github.com/stretchr/testify/assert"
-	"net/http"
 	"testing"
 	"time"
 )
@@ -35,9 +34,8 @@ func TestQueryHandler_Coordinator_NoGroupingMultipleNodesAggregation(t *testing.
 }
 
 func TestQueryHandler_Admin_GrandAdmin(t *testing.T) {
-	client := &http.Client{Timeout: time.Second}
-	handler := &QueryHandler{client, newTestResolver(), newPartitioner(),
-	nil, NewPersistentAuthService(cluster.NewMockAuthStorage())}
+	handler := NewQueryHandler(newTestResolver(), newPartitioner(),
+		nil, NewPersistentAuthService(cluster.NewMockAuthStorage()))
 
 	// The first request has to be creating the admin user
 	mustNotQueryCluster(t, handler, `SHOW DATABASES`)
@@ -101,9 +99,9 @@ func setup() {
 	time.Sleep(time.Millisecond * 50)
 }
 
-func setUpSelectTest() (*QueryHandler) {
+func setUpSelectTest() *QueryHandler {
 	setup()
-	handler := &QueryHandler{&http.Client{Timeout: time.Second}, newTestResolver(), newPartitioner(),
-		nil, nil}
+	handler := NewQueryHandler(newTestResolver(), newPartitioner(),
+		nil, nil)
 	return handler
 }

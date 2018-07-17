@@ -1,12 +1,10 @@
 package service
 
 import (
+	"github.com/adamringhede/influxdb-ha/cluster"
 	"log"
 	"net/http"
 	"strconv"
-	"time"
-
-	"github.com/adamringhede/influxdb-ha/cluster"
 )
 
 type Config struct {
@@ -25,13 +23,10 @@ func Start(
 
 	addr := config.BindAddr + ":" + strconv.FormatInt(int64(config.BindPort), 10)
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	ch := &ClusterHandler{pks, ns}
-	// TODO Add support for authentication and autherozation here as we can not use InfluxDBs here. It would require
-	// manually setting up the password on each node.
+	ch := &ClusterHandler{pks, ns, auth}
 
-	http.Handle("/", &QueryHandler{client, resolver, partitioner, ch, auth})
-	http.Handle("/write", &WriteHandler{client, resolver, partitioner, recovery, auth})
+	http.Handle("/", NewQueryHandler(resolver, partitioner, ch, auth))
+	http.Handle("/write", NewWriteHandler(resolver, partitioner, recovery, auth))
 
 	log.Println("Listening on " + addr)
 	err := http.ListenAndServe(addr, nil)
