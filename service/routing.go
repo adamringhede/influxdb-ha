@@ -52,7 +52,11 @@ func RouteWithCoordination(resolver *cluster.Resolver, partitioner cluster.Parti
 		results, err, res := c.Handle(stmt.(*influxql.SelectStatement), r, db)
 		if err != nil {
 			log.Println(err)
-			passBack(w, res)
+			if res != nil {
+				passBack(w, res)
+			} else {
+				jsonError(w, http.StatusBadRequest, err.Error())
+			}
 		}
 		// TODO Add support for chunked results, in which case we should stream data in chunks
 		return results

@@ -170,7 +170,7 @@ func (c *Coordinator) Handle(stmt *influxql.SelectStatement, r *http.Request, db
 				is partitioned and the query will need to reach all servers.
 				However, finding those as well as the replicas if one fails is trickier.
 			*/
-			return []Result{}, fmt.Errorf("The partition key is not fulfilled given the tags."), nil
+			return []Result{}, fmt.Errorf("the partition key is not fulfilled given the tags in the query"), nil
 		}
 		hashes := c.partitioner.GetHashes(pKey, tagValues)
 
