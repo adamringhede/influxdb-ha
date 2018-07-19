@@ -117,6 +117,9 @@ func mustQueryClusterAuth(t *testing.T, handler http.Handler, cmd string, auth s
 
 func _execClusterCommand(handler http.Handler, cmd string, auth string) *http.Response {
 	req := httptest.NewRequest("GET", fmt.Sprintf("http://%s@localhost/query?q=%s&db=%s", auth, url.QueryEscape(cmd), testDB), nil)
+	if auth != "" {
+		req.SetBasicAuth(strings.Split(auth, ":")[0], strings.Split(auth, ":")[1])
+	}
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	return w.Result()

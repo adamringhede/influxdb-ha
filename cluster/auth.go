@@ -1,16 +1,15 @@
 package cluster
 
 import (
-					"github.com/influxdata/influxdb/services/meta"
-	"github.com/influxdata/influxdb/models"
-	"github.com/coreos/etcd/clientv3"
-	"encoding/json"
 	"context"
-			"github.com/coreos/etcd/mvcc/mvccpb"
-	"log"
-	"github.com/influxdata/influxql"
+	"encoding/json"
+	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/mvcc/mvccpb"
+	"github.com/influxdata/influxdb/models"
+		"github.com/influxdata/influxql"
 	"golang.org/x/crypto/bcrypt"
-)
+	"log"
+	)
 
 /*
 
@@ -24,10 +23,7 @@ open source offering. However, the gaol should be to be as similar to InfluxDB a
 
 const etcdStorageAuth = "auth"
 
-
 type UserInfo struct {
-	meta.UserInfo
-
 	// User's name.
 	Name string
 
@@ -39,6 +35,15 @@ type UserInfo struct {
 
 	// Map of database name to granted privilege.
 	Privileges map[string]influxql.Privilege
+}
+
+// AuthorizeDatabase returns true if the user is authorized for the given privilege on the given database.
+func (ui *UserInfo) AuthorizeDatabase(privilege influxql.Privilege, database string) bool {
+	if ui.Admin || privilege == influxql.NoPrivileges {
+		return true
+	}
+	p, ok := ui.Privileges[database]
+	return ok && (p == privilege || p == influxql.AllPrivileges)
 }
 
 func (u *UserInfo) AuthorizeClusterOperation() bool {
@@ -69,16 +74,16 @@ func (u *UserInfo) AuthorizeSeriesWrite(database string, measurement []byte, tag
 
 type AuthData struct {
 	// TODO add a version key to validate that nothing has changed
-	Users	[]UserInfo
+	Users []UserInfo
 }
 
-func NewAuthData() AuthData {
-	return AuthData{Users:[]UserInfo{}}
+func NewAuthData() *AuthData {
+	return &AuthData{Users: []UserInfo{}}
 }
 
 type AuthStorage interface {
-	Get() (AuthData, error)
-	Save(AuthData) error
+	Get() (*AuthData, error)
+	Save(*AuthData) error
 	Delete() error
 	Watch() chan AuthData
 }
@@ -88,19 +93,18 @@ type EtcdAuthStorage struct {
 }
 
 type MockAuthStorage struct {
-	data AuthData
+	data *AuthData
 }
 
 func NewMockAuthStorage() *MockAuthStorage {
-	return &MockAuthStorage{AuthData{}}
+	return &MockAuthStorage{&AuthData{}}
 }
 
-
-func (s *MockAuthStorage) Get() (AuthData, error) {
+func (s *MockAuthStorage) Get() (*AuthData, error) {
 	return s.data, nil
 }
 
-func (s *MockAuthStorage) Save(data AuthData) error {
+func (s *MockAuthStorage) Save(data *AuthData) error {
 	s.data = data
 	return nil
 }
@@ -119,16 +123,20 @@ func NewEtcdAuthStorage(c *clientv3.Client) *EtcdAuthStorage {
 	return s
 }
 
-func (s *EtcdAuthStorage) Get() (auth AuthData, err error) {
+func (s *EtcdAuthStorage) Get() (*AuthData, error) {
 	resp, err := s.Client.Get(context.Background(), s.path(etcdStorageAuth))
 	if err != nil {
-		return
+		return nil, err
 	}
-	err = json.Unmarshal(resp.Kvs[0].Value, &auth)
-	return
+	if resp.Count > 0 {
+		var auth AuthData
+		err = json.Unmarshal(resp.Kvs[0].Value, &auth)
+		return &auth, err
+	}
+	return nil, nil
 }
 
-func (s *EtcdAuthStorage) Save(auth AuthData) error {
+func (s *EtcdAuthStorage) Save(auth *AuthData) error {
 	data, err := json.Marshal(auth)
 	if err != nil {
 		return err
@@ -142,12 +150,11 @@ func (s *EtcdAuthStorage) Delete() error {
 	return err
 }
 
-
-func (s *EtcdAuthStorage) Watch() (out chan AuthData) {
-	watch := s.Client.Watch(context.Background(), s.path(etcdStorageAuth))
-	for {
-		select {
-		case update := <-watch:
+func (s *EtcdAuthStorage) Watch() (chan AuthData) {
+	out := make(chan AuthData)
+	go (func() {
+		watch := s.Client.Watch(context.Background(), s.path(etcdStorageAuth))
+		for update := range watch {
 			for _, event := range update.Events {
 				var auth AuthData
 				err := json.Unmarshal(event.Kv.Value, &auth)
@@ -159,8 +166,7 @@ func (s *EtcdAuthStorage) Watch() (out chan AuthData) {
 					out <- auth
 				}
 			}
-		case <-out:
-			return // TODO test that closing it acually works. If not, rethink this
 		}
-	}
+	})()
+	return out
 }

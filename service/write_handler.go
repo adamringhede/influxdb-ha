@@ -34,7 +34,7 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Received request %s?%s\n", r.URL.Path, r.URL.RawQuery)
 
 	user, err := authenticate(r, h.authService)
-	if err != nil {
+	if err != nil || user == nil {
 		handleErrorWithCode(w, err, http.StatusUnauthorized)
 		return
 	}
@@ -111,7 +111,7 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var writeErr error
 	if len(broadcastGroup) > 0 {
 		wg.Add(1)
-		locations := h.resolver.FindAllNodes()
+		locations := h.resolver.FindAllNodes() // TODO Partition points by db
 		broadcastData := convertPointToBytes(broadcastGroup, precision)
 		go (func() {
 			relayErr := h.relayToLocations(locations, encodedQuery, auth, broadcastData, db, rp)

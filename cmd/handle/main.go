@@ -54,6 +54,7 @@ func main() {
 	hintsStorage.ClusterID = *clusterID
 	settingsStorage.ClusterID = *clusterID
 	partitionKeyStorage.ClusterID = *clusterID
+	authStorage.ClusterID = *clusterID
 
 	nodeCollection, err := cluster.NewSyncedNodeCollection(nodeStorage)
 	handleErr(err)
@@ -107,7 +108,7 @@ func main() {
 	partitioner.AddKey(cluster.PartitionKey{})
 	importer := syncing.NewImporter(resolver, partitioner, predicate.Test)
 
-	reliableImporter, importWQ := startImporter(importer, c, resolver, *localNode)
+	reliableImporter, importWQ := startImporter(importer, c, resolver, *localNode, *clusterID)
 	reliableImporter.AfterImport = func(token int) {
 		tokenStorage.Assign(token, localNode.Name)
 	}
@@ -157,6 +158,7 @@ func main() {
 	}
 
 	authService := service.NewPersistentAuthService(authStorage)
+	authService.Sync()
 
 	// Starting the service here so that the node can receive writes while joining.
 	// TODO Create a cluster manager component that uses all these storage components etc to not
@@ -183,7 +185,9 @@ func main() {
 		localNode.Status = cluster.NodeStatusUp
 		err = nodeStorage.Save(localNode)
 		// If this fails, the node will be stuck in the wrong state unable to receive writes
-		panic(err)
+		if err != nil {
+			panic(err)
+		}
 		mtx.Unlock(context.Background())
 	} else {
 		// TODO check if importing data from initial sync or from a node being deleted, if so, then resume import.
@@ -302,8 +306,9 @@ func handleErr(err error) {
 	}
 }
 
-func startImporter(importer syncing.Importer, etcdClient *clientv3.Client, resolver *cluster.Resolver, localNode cluster.Node) (*syncing.ReliableImporter, cluster.WorkQueue) {
+func startImporter(importer syncing.Importer, etcdClient *clientv3.Client, resolver *cluster.Resolver, localNode cluster.Node, clusterID string) (*syncing.ReliableImporter, cluster.WorkQueue) {
 	wq := cluster.NewEtcdWorkQueue(etcdClient, localNode.Name, syncing.ReliableImportWorkName)
+	wq.ClusterID = clusterID
 	reliableImporter := syncing.NewReliableImporter(importer, wq, resolver, localNode.DataLocation)
 	go reliableImporter.Start()
 	return reliableImporter, wq

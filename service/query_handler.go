@@ -69,9 +69,12 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, ok := h.authService.(*PersistentAuthService); ok {
+		// There is a danger here. If we use another implementation of the auth service, no changes will be persisted
 		err := h.authService.(*PersistentAuthService).Save()
-		handleInternalError(w, err)
-		return
+		if err != nil {
+			handleInternalError(w, err)
+			return
+		}
 	}
 
 	// TODO replace with a dynamic ResultFlusher that can either save all

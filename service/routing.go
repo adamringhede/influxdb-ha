@@ -61,8 +61,10 @@ func RouteWithCoordination(resolver *cluster.Resolver, partitioner cluster.Parti
 
 func RouteAuthService(authService AuthService) RoutingFunc {
 	return func(w http.ResponseWriter, r *http.Request, stmt influxql.Statement) []Result {
-		if err := HandleAuthStatement(stmt, authService); err != nil {
+		if results, err := HandleAuthStatement(stmt, authService); err != nil {
 			handleBadRequestError(w, err)
+		} else {
+			return results
 		}
 		return []Result{}
 	}
@@ -106,8 +108,7 @@ func (rsf *RoutingStrategyFactory) Build(stmt influxql.Statement, db string) Rou
 		*influxql.ShowFieldKeysStatement,
 		*influxql.ShowRetentionPoliciesStatement,
 		*influxql.ShowSubscriptionsStatement,
-		*influxql.ShowTagKeysStatement,
-		*influxql.ShowUsersStatement:
+		*influxql.ShowTagKeysStatement:
 		return RouteToFirstAvailable(rsf.resolver, rsf.client)
 
 	case *influxql.ShowMeasurementsStatement,
@@ -126,7 +127,8 @@ func (rsf *RoutingStrategyFactory) Build(stmt influxql.Statement, db string) Rou
 		*influxql.GrantAdminStatement,
 		*influxql.RevokeStatement,
 		*influxql.RevokeAdminStatement,
-		*influxql.SetPasswordUserStatement:
+		*influxql.SetPasswordUserStatement,
+		*influxql.ShowUsersStatement:
 		return RouteAuthService(rsf.authService)
 	}
 

@@ -7,7 +7,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"net/http"
 	"time"
-)
+	)
 
 type AuthService interface {
 	User(name string) *cluster.UserInfo
@@ -21,12 +21,11 @@ type AuthService interface {
 }
 
 func authenticate(r *http.Request, authService AuthService) (*cluster.UserInfo, error) {
-	if r.URL.User != nil && r.URL.User.Username() != "" {
-		user := authService.User(r.URL.User.Username())
+	if username, password, ok := r.BasicAuth(); ok {
+		user := authService.User(username)
 		if user == nil {
 			return nil, meta.ErrAuthenticate
 		}
-		password, _ := r.URL.User.Password()
 		if bcrypt.CompareHashAndPassword([]byte(user.Hash), []byte(password)) != nil {
 			return nil, meta.ErrAuthenticate
 		}
@@ -52,11 +51,14 @@ func isAllowed(privileges influxql.ExecutionPrivileges, user cluster.UserInfo, d
 
 type PersistentAuthService struct {
 	storage cluster.AuthStorage
-	auth    cluster.AuthData
+	auth    *cluster.AuthData
 	dirty   bool
 }
 
 func (service *PersistentAuthService) HasAdmin() bool {
+	if service.auth == nil {
+		return false
+	}
 	for _, user := range service.auth.Users {
 		if user.Admin {
 			return true
@@ -70,11 +72,11 @@ func NewPersistentAuthService(storage cluster.AuthStorage) *PersistentAuthServic
 }
 
 func (service *PersistentAuthService) Save() error {
-	if !service.dirty {
+	if !service.dirty || service.auth == nil {
 		return nil
 	}
 	err := service.storage.Save(service.auth)
-	if err != nil {
+	if err == nil {
 		service.dirty = false
 		service.refresh()
 	}
@@ -82,6 +84,9 @@ func (service *PersistentAuthService) Save() error {
 }
 
 func (service *PersistentAuthService) User(name string) *cluster.UserInfo {
+	if service.auth == nil {
+		return nil
+	}
 	for _, user := range service.auth.Users {
 		if user.Name == name {
 			return &user
@@ -91,6 +96,9 @@ func (service *PersistentAuthService) User(name string) *cluster.UserInfo {
 }
 
 func (service *PersistentAuthService) Users() []cluster.UserInfo {
+	if service.auth == nil {
+		return []cluster.UserInfo{}
+	}
 	return service.auth.Users
 }
 
@@ -167,11 +175,13 @@ func (service *PersistentAuthService) refresh() error {
 	if err != nil {
 		return err
 	}
-	service.auth = auth
+	if auth != nil {
+		service.auth = auth
+	}
 	return nil
 }
 
-func (service *PersistentAuthService) Sync() (closer chan struct{}) { // change design to return something lika a Stopper
+func (service *PersistentAuthService) Sync() (closer chan struct{}) {
 	ch := service.storage.Watch()
 	ticker := time.NewTicker(10 * time.Second)
 	service.refresh()
@@ -180,7 +190,7 @@ func (service *PersistentAuthService) Sync() (closer chan struct{}) { // change 
 			select {
 			case auth := <-ch:
 				if !service.dirty {
-					service.auth = auth
+					*service.auth = auth
 				}
 			case <-ticker.C:
 				if !service.dirty {
@@ -196,7 +206,7 @@ func (service *PersistentAuthService) Sync() (closer chan struct{}) { // change 
 	return
 }
 
-func HandleAuthStatement(stmt influxql.Statement, authService AuthService) (err error) {
+func HandleAuthStatement(stmt influxql.Statement, authService AuthService) (results []Result, err error) {
 	switch s := stmt.(type) {
 	case
 		*influxql.CreateUserStatement:
@@ -225,6 +235,13 @@ func HandleAuthStatement(stmt influxql.Statement, authService AuthService) (err 
 		err = updateUser(s.Name, authService, func(u *cluster.UserInfo) {
 			u.Hash = cluster.HashUserPassword(s.Password)
 		})
+	case
+		*influxql.ShowUsersStatement:
+		var values [][]interface{}
+		for _, user := range authService.Users() {
+			values = append(values, []interface{}{user.Name, user.Admin})
+		}
+		results = append(results, createListResults("", []string{"user", "admin"}, values)...)
 	}
 	return
 }
