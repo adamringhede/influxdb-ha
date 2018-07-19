@@ -105,6 +105,7 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	encodedQuery := query.Encode()
 	auth := r.Header.Get("Authorization")
+	// TODO Handle the case that the underlying InfluxDB instances requires authentication.
 
 	wg := sync.WaitGroup{}
 

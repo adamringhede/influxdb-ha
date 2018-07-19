@@ -1,38 +1,55 @@
-package service_test
+package service
 
 import (
-	"net/url"
-	"testing"
+		"testing"
 	"time"
-	"net/http"
-	"log"
-	"github.com/stretchr/testify/assert"
-	"bytes"
-	"io/ioutil"
+					"github.com/adamringhede/influxdb-ha/cluster"
+	"github.com/coreos/etcd/clientv3"
+	"net/http/httptest"
+	"fmt"
+	"strings"
+		"github.com/stretchr/testify/assert"
 )
 
 func TestRouting(t *testing.T) {
-	// TODO start a node locally and run the write query
-	t.Skip()
+	c, err := clientv3.New(clientv3.Config{
+		Endpoints:   []string{"http://127.0.0.1:2379"},
+		DialTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		panic(err)
+	}
+	authStorage := cluster.NewMockAuthStorage()
+	authService := NewPersistentAuthService(authStorage)
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	//q := `select * from cpu_load_short GROUP BY *`
-	values, _ := url.ParseQuery("db=sharded")
-	// insert into autogen treasures,type=gold value=29 1439856000
-	buf := bytes.NewBuffer([]byte("treasures,type=gold value=29 1439856000"))
-	resp, err := client.Post("http://192.168.99.100:8086/write?" + values.Encode(), "text/plain", buf)
-	assert.NoError(t, err)
-	assert.Equal(t, 204, resp.StatusCode)
-	query, _ := url.ParseQuery("db=sharded&q=SELECT * FROM treasures WHERE type='gold'")
-	resp, err = client.Get("http://192.168.99.100:8086/query?" + query.Encode())
-	body, rErr := ioutil.ReadAll(resp.Body)
-	assert.NoError(t, rErr)
-	log.Println(string(body))
-	assert.NoError(t, err)
-	assert.Equal(t, 200, resp.StatusCode)
+	authService.CreateUser(cluster.UserInfo{Name:"admin", Hash: cluster.HashUserPassword("secret"), Admin: true})
+	authService.Save()
+
+	hintsStorage := cluster.NewEtcdHintStorage(c, "test")
+	recoveryStorage := cluster.NewLocalRecoveryStorage("./", hintsStorage)
+	resolver := newTestResolver()
+	partitioner := newPartitioner()
+	handler := NewWriteHandler(resolver, partitioner, recoveryStorage, authService)
+
+	line := "treasures,type=gold value=29 1439856000"
+	writeUrl := fmt.Sprintf("http://localhost/write?db=%s", testDB)
+	req := httptest.NewRequest("GET", writeUrl, strings.NewReader(line))
+	req.SetBasicAuth("admin", "secret")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	assert.Equal(t, w.Code, 204)
+
+	queryHandler := NewQueryHandler(resolver, partitioner, nil, authService)
+	mustQueryClusterAuth(t, queryHandler, "CREATE DATABASE " + testDB, "admin:secret")
+	result := mustQueryClusterAuth(t, queryHandler, "SELECT * FROM treasures WHERE type='gold'", "admin:secret")
+	assert.Len(t, result, 1)
+	assert.Len(t, result[0].Series[0].Values, 1)
+
 }
 
 /*
+TODO Find a way of mocking the data nodes
+TODO Separate testing the partitioned writing and the HTTP service.
 TODO Test hinted hand off
 TODO Test retries
 TODO Test different configurations
