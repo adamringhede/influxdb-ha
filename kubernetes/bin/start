@@ -1,0 +1,4 @@
+#!/bin/bash
+
+kubectl create -f etcd.yaml
+kubectl create -f influxc.yaml

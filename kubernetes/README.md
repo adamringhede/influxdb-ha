@@ -23,3 +23,17 @@ If you don't do this, then the data will be deleted and difficult to recover.
 ```sql
 REMOVE NODE <hostname>
 ```
+
+
+## Debug deployment
+
+
+#### Connect to cluster via influx
+```
+influx -host $(minikube service influxc --format "{{.IP}}") -port $(minikube service influxc --format "{{.Port}}")  
+```
+
+#### Dump meta data
+```
+ETCDCTL_API=3 etcdctl --endpoints "$(minikube service etcd --url)"  get "" --prefix
+```

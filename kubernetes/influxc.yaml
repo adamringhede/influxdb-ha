@@ -6,9 +6,9 @@ metadata:
     app: influxc
 spec:
   ports:
-  - port: 8086
+  - port: 8087
     name: web
-  clusterIP: None
+  type: NodePort
   selector:
     app: influxc
 ---

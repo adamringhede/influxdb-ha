@@ -8,7 +8,7 @@ spec:
   ports:
   - port: 2379
     name: web
-  clusterIP: None
+  type: NodePort
   selector:
     app: etcd
 ---
@@ -30,6 +30,6 @@ spec:
       containers:
       - name: nginx
         image: quay.io/coreos/etcd:v3.1.4
-        command: ["etcd", "--listen-client-urls", "http://0.0.0.0:2379", "--advertise-client-urls", "http://etcd-1:2379"]
+        command: ["etcd", "--listen-client-urls", "http://0.0.0.0:2379", "--advertise-client-urls", "http://$(hostname):2379"]
         ports:
         - containerPort: 2379

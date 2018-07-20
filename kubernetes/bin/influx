@@ -1,0 +1,3 @@
+#!/bin/bash
+
+influx -host $(minikube service influxc --format "{{.IP}}") -port $(minikube service influxc --format "{{.Port}}")

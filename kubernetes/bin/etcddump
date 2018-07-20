@@ -1,0 +1,3 @@
+#!/bin/bash
+
+ETCDCTL_API=3 etcdctl --endpoints "$(minikube service etcd --url)"  get "" --prefix
