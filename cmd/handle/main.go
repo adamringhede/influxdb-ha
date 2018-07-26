@@ -63,8 +63,10 @@ func main() {
 	handleErr(nodeErr)
 	isNew := localNode == nil || localNode.Status == cluster.NodeStatusJoining
 	if localNode == nil {
-		localNode = &cluster.Node{}
-		localNode.Name = nodeName
+		localNode = &cluster.Node{
+			Status: cluster.NodeStatusJoining,
+			Name: nodeName,
+		}
 	}
 	localNode.DataLocation = *data
 	handleErr(nodeStorage.Save(localNode))
@@ -161,11 +163,8 @@ func main() {
 	authService.Sync()
 
 	// Starting the service here so that the node can receive writes while joining.
-	// TODO Create a cluster manager component that uses all these storage components etc to not
-	// have to pass all of them along.
 	go service.Start(resolver, partitioner, recoveryStorage, partitionKeyStorage, nodeStorage, authService, httpConfig)
 
-	// If anythong above fails, it is no longer seen as new and the below will not execute.
 	if isNew {
 		mtx, err := tokenStorage.Lock()
 		handleErr(err)
@@ -175,10 +174,6 @@ func main() {
 			handleErr(err)
 		}
 		if !isFirstNode {
-			log.Println("Joining existing cluster")
-			localNode.Status = cluster.NodeStatusJoining
-			nodeStorage.Save(localNode)
-
 			err = join(localNode, tokenStorage, resolver, importer)
 			handleErr(err)
 		}
