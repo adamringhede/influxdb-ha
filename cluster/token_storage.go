@@ -12,7 +12,7 @@ import (
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/clientv3/concurrency"
 	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
-)
+	)
 
 const maxToken = 2147483647
 
@@ -21,6 +21,12 @@ type TokenStorage interface {
 	Get() (map[int]string, error)
 	Reserve(token int, node string) (bool, error)
 	Release(token int) error
+	InitMany(node string, numRanges int) (bool, error)
+}
+
+type LockableTokenStorage interface {
+	TokenStorage
+	Lock() (*concurrency.Mutex, error)
 }
 
 const etcdStorageTokens = "tokens"
@@ -44,8 +50,8 @@ func (s *EtcdTokenStorage) Lock() (*concurrency.Mutex, error) {
 	return mtx, nil
 }
 
-func (s *EtcdTokenStorage) SuggestReservations() ([]int, error) {
-	currentTokens, err := s.Get()
+func SuggestReservations(tokenStorage TokenStorage) ([]int, error) {
+	currentTokens, err := tokenStorage.Get()
 	if err != nil {
 		return nil, err
 	}

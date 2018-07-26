@@ -181,29 +181,21 @@ func (service *PersistentAuthService) refresh() error {
 	return nil
 }
 
-func (service *PersistentAuthService) Sync() (closer chan struct{}) {
+func (service *PersistentAuthService) Sync() {
 	ch := service.storage.Watch()
 	ticker := time.NewTicker(10 * time.Second)
 	service.refresh()
-	go (func() {
-		for {
-			select {
-			case auth := <-ch:
-				if !service.dirty {
-					*service.auth = auth
-				}
-			case <-ticker.C:
-				if !service.dirty {
-					service.refresh()
-				}
-			case <-closer:
-				close(ch)
-				ticker.Stop()
-				return
+	for {
+		select {
+		case auth := <-ch:
+			if !service.dirty {
+				*service.auth = auth
 			}
-		}
-	})()
-	return
+		case <-ticker.C:
+			if !service.dirty {
+				service.refresh()
+			}
+	}
 }
 
 func HandleAuthStatement(stmt influxql.Statement, authService AuthService) (results []Result, err error) {

@@ -127,7 +127,7 @@ watch:
 }
 
 // WaitUntilRecovered is used to block until no more node has data that should be recovered.
-func WaitUntilRecoveredWithCallback(storage *EtcdHintStorage, nodeName string, cb func()) {
+func WhenRecovered(storage *EtcdHintStorage, nodeName string, cb func()) {
 	go func() {
 		<-WaitUntilRecovered(storage, nodeName)
 		cb()
