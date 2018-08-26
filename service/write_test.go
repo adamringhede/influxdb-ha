@@ -4,18 +4,18 @@ import (
 	"errors"
 	"fmt"
 	"github.com/adamringhede/influxdb-ha/cluster"
-	"github.com/coreos/etcd/clientv3"
 	"github.com/influxdata/influxdb/models"
 	"github.com/stretchr/testify/assert"
+	"io/ioutil"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestRouting(t *testing.T) {
-	handler, _, _, _ := newTestWriteHandler()
 	pointsWriter := NewMockPointsWriter()
+
+	handler, _, _, _ := newTestWriteHandler(pointsWriter)
 	handler.pointsWriter = pointsWriter
 
 	line := `asdf,type=gold value=29 1439856000
@@ -36,30 +36,43 @@ func TestRouting(t *testing.T) {
 	assert.Len(t, result[0].Series[0].Values, 2)*/
 }
 
-func newTestWriteHandler() (*WriteHandler, *cluster.Resolver, cluster.Partitioner, AuthService) {
-	c, err := clientv3.New(clientv3.Config{
-		Endpoints:   []string{"http://127.0.0.1:2379"},
-		DialTimeout: 5 * time.Second,
-	})
-	if err != nil {
-		panic(err)
+func BenchmarkRouting(b *testing.B) {
+	pointsWriter := NewMockPointsWriter()
+
+	handler, _, _, _ := newTestWriteHandler(pointsWriter)
+	linesBuilder := strings.Builder{}
+	for i := 0; i < 100; i++ {
+		linesBuilder.WriteString("asdf,type=gold value=29 1439856000\n")
 	}
+	payload := linesBuilder.String()
+	for i := 0; i < b.N; i++ {
+		writeUrl := fmt.Sprintf("http://localhost/write?db=%s", testDB)
+		req := httptest.NewRequest("POST", writeUrl, strings.NewReader(payload))
+		req.SetBasicAuth("admin", "secret")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		res, err := ioutil.ReadAll(w.Body)
+		assert.NoError(b, err)
+		println(string(res))
+	}
+}
+
+func newTestWriteHandler(pointsWriter PointsWriter) (*WriteHandler, *cluster.Resolver, cluster.Partitioner, AuthService) {
 	authStorage := cluster.NewMockAuthStorage()
 	authService := NewPersistentAuthService(authStorage)
 
 	authService.CreateUser(cluster.UserInfo{Name: "admin", Hash: cluster.HashUserPassword("secret"), Admin: true})
 	authService.Save()
 
-	hintsStorage := cluster.NewEtcdHintStorage(c, "test")
-	recoveryStorage := cluster.NewLocalRecoveryStorage("./", hintsStorage)
 	resolver := newTestResolver()
 	partitioner := newPartitioner()
-	handler := NewWriteHandler(resolver, partitioner, recoveryStorage, authService)
+	handler := NewWriteHandler(resolver, partitioner, authService, pointsWriter)
 	return handler, resolver, partitioner, authService
 }
 
 /*
-TODO Test saving to recovery with mocked recovery storage (this will remove the need for hints storage and etcd)
+TODO Test saving to recovery with mocked recovery storage
+	This requires moving the recovery out of the HttpPointsWriter
 */
 
 type MockPointsWriter struct {
@@ -92,4 +105,30 @@ type FailingPointsWriter struct{}
 
 func (w *FailingPointsWriter) WritePoints(points []models.Point, locations []*cluster.Node, writeContext WriteContext) error {
 	return errors.New("write failed")
+}
+
+type MockRecoveryStorage struct {
+	data map[string]bool
+}
+
+func NewMockRecoveryStorage() *MockRecoveryStorage {
+	return &MockRecoveryStorage{map[string]bool{}}
+}
+
+func (rs *MockRecoveryStorage) Put(nodeName, db, rp string, buf []byte) error {
+	rs.data[strings.Join([]string{nodeName, db, rp}, ".")] = true
+	return nil
+}
+
+func (rs *MockRecoveryStorage) Get(nodeName string) (chan cluster.RecoveryChunk, error) {
+	ch := make(chan cluster.RecoveryChunk)
+	return ch, nil
+}
+
+func (rs *MockRecoveryStorage) Drop(nodeName string) error {
+	return nil
+}
+
+func (rs *MockRecoveryStorage) hasData() bool {
+	return len(rs.data) > 0
 }

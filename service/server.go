@@ -26,7 +26,7 @@ func Start(
 	ch := &ClusterHandler{pks, ns, auth}
 
 	http.Handle("/", NewQueryHandler(resolver, partitioner, ch, auth))
-	http.Handle("/write", NewWriteHandler(resolver, partitioner, recovery, auth))
+	http.Handle("/write", NewWriteHandler(resolver, partitioner, auth, NewHttpPointsWriter(recovery)))
 
 	log.Println("Listening on " + addr)
 	err := http.ListenAndServe(addr, nil)

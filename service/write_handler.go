@@ -18,18 +18,16 @@ import (
 type WriteHandler struct {
 	resolver        *cluster.Resolver
 	partitioner     cluster.Partitioner
-	recoveryStorage cluster.RecoveryStorage
 	authService     AuthService
 	pointsWriter    PointsWriter
 }
 
-func NewWriteHandler(resolver *cluster.Resolver, partitioner cluster.Partitioner, rs cluster.RecoveryStorage, authService AuthService) *WriteHandler {
+func NewWriteHandler(resolver *cluster.Resolver, partitioner cluster.Partitioner, authService AuthService, pointsWriter PointsWriter) *WriteHandler {
 	return &WriteHandler{
 		resolver,
 		partitioner,
-		rs,
 		authService,
-		NewHttpPointsWriter(rs),
+		pointsWriter,
 	}
 }
 

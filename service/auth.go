@@ -7,7 +7,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"net/http"
 	"time"
-	)
+)
 
 type AuthService interface {
 	User(name string) *cluster.UserInfo
@@ -195,6 +195,7 @@ func (service *PersistentAuthService) Sync() {
 			if !service.dirty {
 				service.refresh()
 			}
+		}
 	}
 }
 
