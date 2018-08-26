@@ -28,7 +28,7 @@ func TestEtcdTokenStorage_SuggestReservations(t *testing.T) {
 	storage := newEtcdStorage()
 	_, err := storage.InitMany("bar", 16)
 	assert.NoError(t, err)
-	suggestions, err := storage.SuggestReservations()
+	suggestions, err := SuggestReservations(storage)
 	assert.NoError(t, err)
 	assert.Len(t, suggestions, 8)
 }

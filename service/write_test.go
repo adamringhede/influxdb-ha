@@ -16,7 +16,6 @@ func TestRouting(t *testing.T) {
 	pointsWriter := NewMockPointsWriter()
 
 	handler, _, _, _ := newTestWriteHandler(pointsWriter)
-	handler.pointsWriter = pointsWriter
 
 	line := `asdf,type=gold value=29 1439856000
              asdf,type=gold value=29 1439859000`
