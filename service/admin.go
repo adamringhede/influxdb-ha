@@ -30,10 +30,17 @@ type ClusterHandler struct {
 func (h *ClusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	queryParam := r.URL.Query().Get("q")
 
-	user, err := authenticate(r, h.authService)
-	if err != nil {
-		handleErrorWithCode(w, err, http.StatusUnauthorized)
-		return
+	if h.authService != nil {
+		user, err := authenticate(r, h.authService)
+		if err != nil {
+			handleErrorWithCode(w, err, http.StatusUnauthorized)
+			return
+		}
+
+		if !user.AuthorizeClusterOperation() {
+			jsonError(w, http.StatusForbidden, "forbidden cluster statement")
+			return
+		}
 	}
 
 	// TODO add support for multiple statements in single query
@@ -45,10 +52,6 @@ func (h *ClusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !user.AuthorizeClusterOperation() {
-		jsonError(w, http.StatusForbidden, "forbidden cluster statement")
-		return
-	}
 
 	switch stmt.(type) {
 	case clusterql.ShowPartitionKeysStatement:

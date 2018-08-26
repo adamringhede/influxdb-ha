@@ -8,37 +8,49 @@ import (
 	"strings"
 	"testing"
 
+	"fmt"
 	"github.com/adamringhede/influxdb-ha/cluster"
 	"github.com/coreos/etcd/clientv3"
 	"github.com/stretchr/testify/assert"
-	"fmt"
 )
+
+func TestUpdateReplicationFactor(t *testing.T) {
+	// write some data, test that it exists on the expected number of hosts.
+	// increase replication factor
+	// the data should now start to be replicated to other hosts
+	// check that data is replicated
+	// decrease replication factor
+	// make sure it is deleted where it is no longer needed
+	// This is not a critical features and we could hold off on it.
+
+	// TODO also need to test updating the default and per database (default should be enough to begin with).
+}
 
 func TestShowPartitionKeys(t *testing.T) {
 	t.Parallel()
 	pks, ch := setupAdminTest()
 	pks.Save(&cluster.PartitionKey{"test_db", "cpu", []string{"server_id"}})
 
-	result := mustQueryCluster(t, ch, "SHOW PARTITION KEYS")
+	result := mustQueryClusterAuth(t, ch, "SHOW PARTITION KEYS", "admin:secret")
 	assert.Len(t, result[0].Series[0].Values, 1)
 
-	result = mustQueryCluster(t, ch, "SHOW PARTITION KEYS ON test_db")
+	result = mustQueryClusterAuth(t, ch, "SHOW PARTITION KEYS ON test_db", "admin:secret")
 	assert.Len(t, result[0].Series[0].Values, 1)
 
-	result = mustQueryCluster(t, ch, "SHOW PARTITION KEYS ON test_db2")
+	result = mustQueryClusterAuth(t, ch, "SHOW PARTITION KEYS ON test_db2", "admin:secret")
 	assert.Len(t, result[0].Series[0].Values, 0)
 }
 
 func TestCreatePartitionKey(t *testing.T) {
 	t.Parallel()
 	pks, ch := setupAdminTest()
-	mustQueryCluster(t, ch, "CREATE PARTITION KEY server_id ON test_db")
+	mustQueryClusterAuth(t, ch, "CREATE PARTITION KEY server_id ON test_db", "admin:secret")
 
 	keys, _ := pks.GetAll()
 	assert.Len(t, keys, 1)
 	assert.Equal(t, "test_db", keys[0].Database)
 
-	statusCode, _ := mustNotQueryCluster(t, ch, "CREATE PARTITION KEY server_id ON test_db")
+	statusCode, _ := mustNotQueryClusterAuth(t, ch, "CREATE PARTITION KEY server_id ON test_db", "admin:secret")
 	assert.Equal(t, 409, statusCode)
 }
 
@@ -47,7 +59,7 @@ func TestDropPartitionKey(t *testing.T) {
 	pks, ch := setupAdminTest()
 	pks.Save(&cluster.PartitionKey{"test_db", "cpu", []string{"server_id"}})
 
-	mustQueryCluster(t, ch, "DROP PARTITION KEY ON test_db.cpu")
+	mustQueryClusterAuth(t, ch, "DROP PARTITION KEY ON test_db.cpu", "admin:secret")
 
 	keys, _ := pks.GetAll()
 	assert.Len(t, keys, 0)
@@ -57,7 +69,7 @@ func TestShowNodes(t *testing.T) {
 	t.Parallel()
 	_, ch := setupAdminTest()
 	ch.nodeStorage.Save(&cluster.Node{Name: "mynode"})
-	results := mustQueryCluster(t, ch, "SHOW NODES")
+	results := mustQueryClusterAuth(t, ch, "SHOW NODES", "admin:secret")
 	assert.Len(t, results[0].Series[0].Values, 1)
 }
 
@@ -65,7 +77,7 @@ func TestRemoveNode(t *testing.T) {
 	t.Parallel()
 	_, ch := setupAdminTest()
 	ch.nodeStorage.Save(&cluster.Node{Name: "mynode"})
-	mustQueryCluster(t, ch, "REMOVE NODE mynode")
+	mustQueryClusterAuth(t, ch, "REMOVE NODE mynode", "admin:secret")
 	node, _ := ch.nodeStorage.Get("mynode")
 	assert.Nil(t, node)
 }
@@ -73,7 +85,7 @@ func TestRemoveNode(t *testing.T) {
 func TestInvalidQueryFormat(t *testing.T) {
 	t.Parallel()
 	_, ch := setupAdminTest()
-	statusCode, msg := mustNotQueryCluster(t, ch, "DROP PARTITION")
+	statusCode, msg := mustNotQueryClusterAuth(t, ch, "DROP PARTITION", "admin:secret")
 	assert.Equal(t, statusCode, 400)
 	assert.Equal(t, `{"error":"error parsing query: unexpected end of statement, expecting KEY"}`, msg)
 }
@@ -81,7 +93,12 @@ func TestInvalidQueryFormat(t *testing.T) {
 func setupAdminTest() (cluster.PartitionKeyStorage, *ClusterHandler) {
 	pks := NewMockedPartitionKeyStorage()
 	ns := NewMockedNodeStorage()
-	ch := &ClusterHandler{partitionKeyStorage: pks, nodeStorage: ns}
+	authStorage := cluster.NewMockAuthStorage()
+	authService := NewPersistentAuthService(authStorage)
+	authService.CreateUser(cluster.UserInfo{Name: "admin", Hash: cluster.HashUserPassword("secret"), Admin: true})
+	authService.Save()
+
+	ch := &ClusterHandler{partitionKeyStorage: pks, nodeStorage: ns, authService: authService}
 	return pks, ch
 }
 
@@ -116,7 +133,7 @@ func mustQueryClusterAuth(t *testing.T, handler http.Handler, cmd string, auth s
 }
 
 func _execClusterCommand(handler http.Handler, cmd string, auth string) *http.Response {
-	req := httptest.NewRequest("GET", fmt.Sprintf("http://%s@localhost/query?q=%s&db=%s", auth, url.QueryEscape(cmd), testDB), nil)
+	req := httptest.NewRequest("GET", fmt.Sprintf("http://%s@localhost/query?q=%s&db=%s&precision=ns", auth, url.QueryEscape(cmd), testDB), nil)
 	if auth != "" {
 		req.SetBasicAuth(strings.Split(auth, ":")[0], strings.Split(auth, ":")[1])
 	}
