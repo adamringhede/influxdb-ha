@@ -29,22 +29,7 @@ type ClusterHandler struct {
 
 func (h *ClusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	queryParam := r.URL.Query().Get("q")
-
-	if h.authService != nil {
-		user, err := authenticate(r, h.authService)
-		if err != nil {
-			handleErrorWithCode(w, err, http.StatusUnauthorized)
-			return
-		}
-
-		if !user.AuthorizeClusterOperation() {
-			jsonError(w, http.StatusForbidden, "forbidden cluster statement")
-			return
-		}
-	}
-
-	// TODO add support for multiple statements in single query
-	// TODO support using both influxdb statements and cluster statements in same query
+	if !h.checkAccess(w, r) { return }
 
 	stmt, err := clusterql.NewParser(strings.NewReader(queryParam), clusterLanguage).Parse()
 	if err != nil {
@@ -52,69 +37,36 @@ func (h *ClusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-
-	switch stmt.(type) {
+	switch _stmt := stmt.(type) {
 	case clusterql.ShowPartitionKeysStatement:
-		keys, err := h.partitionKeyStorage.GetAll()
-		handleInternalError(w, err)
-		dbFilter := stmt.(clusterql.ShowPartitionKeysStatement).Database
-		columns := []string{"database", "measurement", "tags"}
-		values := [][]interface{}{}
-		for _, key := range keys {
-			if dbFilter == "" || dbFilter == key.Database {
-				values = append(values, []interface{}{key.Database, key.Measurement, strings.Join(key.Tags, ".")})
-			}
-		}
-		respondWithResults(w, createListResults("partition keys", columns, values))
-		return
+		handleShowPartitionKeys(_stmt, h.partitionKeyStorage, w)
 	case clusterql.CreatePartitionKeyStatement:
-		input := stmt.(clusterql.CreatePartitionKeyStatement)
-		partitionKey := &cluster.PartitionKey{Database: input.Database, Measurement: input.Measurement, Tags: input.Tags}
-		// check that one not already exists
-		// create and save one
-		keys, err := h.partitionKeyStorage.GetAll()
-		handleInternalError(w, err)
-		for _, pk := range keys {
-			if pk.Identifier() == partitionKey.Identifier() {
-				jsonError(w, http.StatusConflict, "a partition key already exist on "+pk.Identifier())
-				return
-			}
-		}
-		// It should not be possible to create a partition token for a collection that already has one.
-		saveErr := h.partitionKeyStorage.Save(partitionKey)
-		handleInternalError(w, saveErr)
-		respondWithEmpty(w)
+		handleCreatePartitionKey(_stmt, h.partitionKeyStorage, w)
 	case clusterql.DropPartitionKeyStatement:
-		err := h.partitionKeyStorage.Drop(
-			stmt.(clusterql.DropPartitionKeyStatement).Database,
-			stmt.(clusterql.DropPartitionKeyStatement).Measurement,
-		)
-		handleInternalError(w, err)
-		respondWithEmpty(w)
-		return
+		handleDropPartitionKey(_stmt, h.partitionKeyStorage, w)
 	case clusterql.RemoveNodeStatement:
-		name := stmt.(clusterql.RemoveNodeStatement).Name
-		ok, err := h.nodeStorage.Remove(name)
-		// TODO Admins need a way of monitoring the state of imports happening.
-		handleInternalError(w, err)
-		if !ok {
-			jsonError(w, http.StatusNotFound, "could not find node with name \""+name+"\"")
-			return
-		}
-		respondWithEmpty(w)
-		return
+		handleRemoveNode(_stmt, h.nodeStorage, w)
 	case clusterql.ShowNodesStatement:
-		values := [][]interface{}{}
-		nodes, err := h.nodeStorage.GetAll()
-		handleInternalError(w, err)
-		for _, node := range nodes {
-			values = append(values, []interface{}{node.Name, node.DataLocation})
-		}
-		respondWithResults(w, createListResults("nodes", []string{"name", "data location"}, values))
-		return
+		handleShowNodes(_stmt, h.nodeStorage, w)
 	default:
 		jsonError(w, http.StatusInternalServerError, "not implemented")
 	}
+}
+
+func (h *ClusterHandler) checkAccess(w http.ResponseWriter, r *http.Request) bool {
+	if h.authService != nil {
+		user, err := authenticate(r, h.authService)
+		if err != nil {
+			handleErrorWithCode(w, err, http.StatusUnauthorized)
+			return false
+		}
+
+		if !user.AuthorizeClusterOperation() {
+			jsonError(w, http.StatusForbidden, "forbidden cluster statement")
+			return false
+		}
+	}
+	return true
 }
 
 func handleInternalError(w http.ResponseWriter, err error) {
@@ -129,4 +81,63 @@ func createListResults(name string, columns []string, values [][]interface{}) []
 		Columns: columns,
 		Values:  values,
 	}}}}
+}
+
+func handleShowPartitionKeys(stmt clusterql.ShowPartitionKeysStatement, pks cluster.PartitionKeyStorage, w http.ResponseWriter) {
+	keys, err := pks.GetAll()
+	handleInternalError(w, err)
+	columns := []string{"database", "measurement", "tags"}
+	var values [][]interface{}
+	for _, key := range keys {
+		if stmt.Database == "" || stmt.Database == key.Database {
+			values = append(values, []interface{}{key.Database, key.Measurement, strings.Join(key.Tags, ".")})
+		}
+	}
+	respondWithResults(w, createListResults("partition keys", columns, values))
+}
+
+func handleCreatePartitionKey(stmt clusterql.CreatePartitionKeyStatement, pks cluster.PartitionKeyStorage, w http.ResponseWriter) {
+	partitionKey := &cluster.PartitionKey{Database: stmt.Database, Measurement: stmt.Measurement, Tags: stmt.Tags}
+	// check that one not already exists
+	// create and save one
+	keys, err := pks.GetAll()
+	handleInternalError(w, err)
+	for _, pk := range keys {
+		if pk.Identifier() == partitionKey.Identifier() {
+			jsonError(w, http.StatusConflict, "a partition key already exist on "+pk.Identifier())
+			return
+		}
+	}
+	// It should not be possible to create a partition token for a collection that already has one.
+	saveErr := pks.Save(partitionKey)
+	handleInternalError(w, saveErr)
+	respondWithEmpty(w)
+}
+
+func handleDropPartitionKey(stmt clusterql.DropPartitionKeyStatement, pks cluster.PartitionKeyStorage, w http.ResponseWriter) {
+	err := pks.Drop(stmt.Database, stmt.Measurement)
+	handleInternalError(w, err)
+	respondWithEmpty(w)
+}
+
+func handleRemoveNode(stmt clusterql.RemoveNodeStatement, storage cluster.NodeStorage, w http.ResponseWriter) {
+	name := stmt.Name
+	ok, err := storage.Remove(name)
+	// TODO Admins need a way of monitoring the state of imports happening.
+	handleInternalError(w, err)
+	if !ok {
+		jsonError(w, http.StatusNotFound, "could not find node with name \""+name+"\"")
+		return
+	}
+	respondWithEmpty(w)
+}
+
+func handleShowNodes(stmt clusterql.ShowNodesStatement, storage cluster.NodeStorage, w http.ResponseWriter) {
+	values := [][]interface{}{}
+	nodes, err := storage.GetAll()
+	handleInternalError(w, err)
+	for _, node := range nodes {
+		values = append(values, []interface{}{node.Name, node.DataLocation})
+	}
+	respondWithResults(w, createListResults("nodes", []string{"name", "data location"}, values))
 }
