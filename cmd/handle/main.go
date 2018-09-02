@@ -1,13 +1,14 @@
 package main
 
 import (
-		"flag"
+	"flag"
 	"log"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/adamringhede/influxdb-ha/cluster"
+	. "github.com/adamringhede/influxdb-ha/cmd/handle/join"
 	"github.com/adamringhede/influxdb-ha/service"
 	"github.com/adamringhede/influxdb-ha/syncing"
 	"github.com/coreos/etcd/clientv3"
@@ -92,7 +93,7 @@ func start(clusterID string, nodeName string, etcdEndpoints string, dataLocation
 	authService := service.NewPersistentAuthService(authStorage)
 
 	// TODO change this to another way of handling node removal in the request handler.
-	nodeStorage.OnRemove(handleNodeRemoval(nodeCollection, tokenStorage, resolver, hintsStorage, importWQ))
+	nodeStorage.OnRemove(NewClusterNodeDeallocator(nodeCollection, tokenStorage, resolver, hintsStorage, importWQ).Remove)
 
 	go (func() {
 		for rf := range settingsStorage.WatchDefaultReplicationFactor() {
@@ -107,7 +108,8 @@ func start(clusterID string, nodeName string, etcdEndpoints string, dataLocation
 	go service.Start(resolver, partitioner, recoveryStorage, partitionKeyStorage, nodeStorage, authService, httpConfig)
 
 	if isNew {
-		join(localNode, tokenStorage, nodeStorage, resolver, importer)
+		err = Join(localNode, tokenStorage, nodeStorage, resolver, importer)
+		handleErr(err)
 	} else {
 		recoverFailedWrites(hintsStorage, nodeStorage, localNode)
 	}
@@ -139,17 +141,10 @@ func recoverFailedWrites(hintsStorage *cluster.EtcdHintStorage, nodeStorage clus
 	if len(selfHints) != 0 {
 		localNode.Status = cluster.NodeStatusRecovering
 		nodeStorage.Save(localNode)
-
-		cluster.WhenRecovered(hintsStorage, localNode.Name, func() {
-			// It may be better instead to emit an event like finishedRecovery to some
-			// thing that manages the state.
-			localNode.Status = cluster.NodeStatusUp
-			nodeStorage.Save(localNode)
-		})
-	} else {
-		localNode.Status = cluster.NodeStatusUp
-		nodeStorage.Save(localNode)
+		<-cluster.WaitUntilRecovered(hintsStorage, localNode.Name)
 	}
+	localNode.Status = cluster.NodeStatusUp
+	nodeStorage.Save(localNode)
 }
 
 func handleErr(err error) {
@@ -166,43 +161,64 @@ func startImporter(importer syncing.Importer, etcdClient *clientv3.Client, resol
 	return reliableImporter, wq
 }
 
-func handleNodeRemoval(nodeCollection cluster.NodeCollection, tokenStorage cluster.TokenStorage,
-	resolver *cluster.Resolver, hintsStorage cluster.HintStorage, importWQ cluster.WorkQueue) func(cluster.Node) {
+type NodeDeallocator interface {
+	// Remove should reassign partitions from the node to other nodes in the cluster.
+	Remove(cluster.Node)
+}
 
-	return func(removedNode cluster.Node) {
-		// Distribute tokens to other nodes
-		nodes := []string{}
-		tokenGroups := map[string][]int{}
-		for name := range nodeCollection.GetAll() {
-			if name != removedNode.Name {
-				if _, ok := tokenGroups[name]; !ok {
-					nodes = append(nodes, name)
-					tokenGroups[name] = []int{}
-				}
+type ClusterNodeDeallocator struct {
+	nodeCollection cluster.NodeCollection
+	tokenStorage   cluster.TokenStorage
+	resolver       *cluster.Resolver
+	hintsStorage   cluster.HintStorage
+	importWQ       cluster.WorkQueue
+}
+
+func NewClusterNodeDeallocator(
+	nodeCollection cluster.NodeCollection,
+	tokenStorage cluster.TokenStorage,
+	resolver *cluster.Resolver,
+	hintsStorage cluster.HintStorage,
+	importWQ cluster.WorkQueue,
+) *ClusterNodeDeallocator {
+	return &ClusterNodeDeallocator{nodeCollection, tokenStorage,
+		resolver, hintsStorage, importWQ}
+}
+
+func (nd *ClusterNodeDeallocator) Remove(node cluster.Node) {
+	// Distribute tokens to other nodes
+	nodes := []string{}
+	tokenGroups := map[string][]int{}
+	for name := range nd.nodeCollection.GetAll() {
+		if name != node.Name {
+			if _, ok := tokenGroups[name]; !ok {
+				nodes = append(nodes, name)
+				tokenGroups[name] = []int{}
 			}
 		}
-		tokensMap, err := tokenStorage.Get()
-		if err != nil {
-			return
+	}
+	tokensMap, err := nd.tokenStorage.Get()
+	if err != nil {
+		// TODO Recover from being unable to get from tokenStorage
+		return
+	}
+	var i int
+	for token, nodeName := range tokensMap {
+		if nodeName != node.Name {
+			selectedNode := nodes[i%len(nodes)]
+			tokenGroups[selectedNode] = append(tokenGroups[selectedNode], token)
+			tokenGroups[selectedNode] = append(tokenGroups[selectedNode], nd.resolver.ReverseSecondaryLookup(token)...)
+			i++
 		}
-		var i int
-		for token, nodeName := range tokensMap {
-			if nodeName != removedNode.Name {
-				selectedNode := nodes[i%len(nodes)]
-				tokenGroups[selectedNode] = append(tokenGroups[selectedNode], token)
-				tokenGroups[selectedNode] = append(tokenGroups[selectedNode], resolver.ReverseSecondaryLookup(token)...)
-				i++
-			}
-		}
-		for nodeName, tokens := range tokenGroups {
-			importWQ.Push(nodeName, syncing.ReliableImportPayload{Tokens: tokens, NonPartitioned: true})
-		}
-		// Remove all hints that may be held by this node. If the node is removed, there will be no way
-		// for it to recover the data to the target node so we need to delete the hints so that the target
-		// node will get the correct status and accept reads.
-		hintsTargets, _ := hintsStorage.GetByHolder()
-		for _, target := range hintsTargets {
-			hintsStorage.Done(target)
-		}
+	}
+	for nodeName, tokens := range tokenGroups {
+		nd.importWQ.Push(nodeName, syncing.ReliableImportPayload{Tokens: tokens, NonPartitioned: true})
+	}
+	// Remove all hints that may be held by this node. If the node is removed, there will be no way
+	// for it to recover the data to the target node so we need to delete the hints so that the target
+	// node will get the correct status and accept reads.
+	hintsTargets, _ := nd.hintsStorage.GetByHolder()
+	for _, target := range hintsTargets {
+		nd.hintsStorage.Done(target)
 	}
 }

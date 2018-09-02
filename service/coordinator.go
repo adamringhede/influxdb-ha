@@ -402,7 +402,7 @@ func NewResultSource(results []Result) *ResultSource {
 	}
 
 	// Group values by time and ensure order. This assumes that both results have the exact same time-steps and
-	// that times are strings.
+	// that times are strings. TODO They may be floats. Need to fix this
 	a := map[string]int{}
 	ai := 0
 	for _, res := range results {

@@ -5,3 +5,7 @@ build:
 
 save:
 	godep save ./...
+
+push-dockerhub:
+	docker build -t adamringhede/influxdb-cluster -f Dockerfile_handle . && \
+	docker push adamringhede/influxdb-cluster

@@ -69,4 +69,12 @@ func init() {
 		utils.MustQuery(clnt, "CREATE DATABASE "+utils.TestDB)
 	}
 	time.Sleep(time.Millisecond * 50)
+
+	handle := utils.NewClient("192.168.99.100:8086")
+	utils.Query(handle, "CREATE USER admin WITH PASSWORD 'password' WITH ALL PRIVILEGES")
+	time.Sleep(3*time.Second)
+	utils.MustQuery(handle, "SHOW USERS")
+	utils.Query(handle, "DROP PARTITION KEY ON sharded.treasures")
+	time.Sleep(3*time.Second)
+	utils.MustQuery(handle, "CREATE PARTITION KEY type ON sharded.treasures")
 }

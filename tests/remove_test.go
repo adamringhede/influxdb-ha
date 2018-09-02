@@ -20,10 +20,10 @@ func TestRemoveNode(t *testing.T) {
 	clnt3 := utils.NewClient(utils.InfluxThree)
 
 	assertData(t, clnt1, 1)
-	assertData(t, clnt2, 1)
-	assertData(t, clnt3, 0)
+	assertData(t, clnt2, 0)
+	assertData(t, clnt3, 1)
 
-	utils.StopNode(utils.Nodes[1])
+	utils.StopNode(utils.Nodes[2])
 	utils.MustQuery(handle, "REMOVE NODE " + utils.Nodes[0][0])
 	// TODO try removing it before stopping.
 
@@ -31,7 +31,7 @@ func TestRemoveNode(t *testing.T) {
 
 	// Tokens should now have been distributed and the data should exist on all existing nodes.
 	assertData(t, clnt1, 1)
-	assertData(t, clnt3, 1)
+	assertData(t, clnt2, 1)
 }
 
 func TestRemoveNodeWhenOthersAreDown(t *testing.T) {
@@ -46,8 +46,8 @@ func TestRemoveNodeWhenOthersAreDown(t *testing.T) {
 	clnt3 := utils.NewClient(utils.InfluxThree)
 
 	assertData(t, clnt1, 1)
-	assertData(t, clnt2, 1)
-	assertData(t, clnt3, 0)
+	assertData(t, clnt2, 0)
+	assertData(t, clnt3, 1)
 
-	utils.StopNode(utils.Nodes[1])
+	utils.StopNode(utils.Nodes[2])
 }

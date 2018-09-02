@@ -47,7 +47,7 @@ func (ui *UserInfo) AuthorizeDatabase(privilege influxql.Privilege, database str
 }
 
 func (u *UserInfo) AuthorizeClusterOperation() bool {
-	return u.Admin
+	return u == nil || u.Admin
 }
 
 func NewUser(name, hash string, admin bool) UserInfo {

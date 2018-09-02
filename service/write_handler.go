@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"fmt"
+	"github.com/influxdata/influxdb/services/meta"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -34,19 +35,6 @@ func NewWriteHandler(resolver *cluster.Resolver, partitioner cluster.Partitioner
 func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Received request %s?%s\n", r.URL.Path, r.URL.RawQuery)
 
-	user, err := authenticate(r, h.authService)
-	if err != nil || user == nil {
-		handleErrorWithCode(w, err, http.StatusUnauthorized)
-		return
-	}
-
-	buf, err := ioutil.ReadAll(r.Body)
-	points, err := models.ParsePoints(buf)
-	if err != nil {
-		jsonError(w, http.StatusBadRequest, "unable to parse points")
-		return
-	}
-
 	query := r.URL.Query()
 	db := query.Get("db")
 	if db == "" {
@@ -61,14 +49,33 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		precision = "nanoseconds"
 	}
 
-	if !user.AuthorizeDatabase(influxql.WritePrivilege, db) {
-		jsonError(w, http.StatusForbidden, "forbidden to write to database: "+db) // TODO Get the corret error message
+	buf, err := ioutil.ReadAll(r.Body)
+	points, err := models.ParsePoints(buf)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "unable to parse points")
 		return
 	}
-	for _, point := range points {
-		if !user.AuthorizeSeriesWrite(db, point.Name(), point.Tags()) {
-			jsonError(w, http.StatusForbidden, "forbidden to write to measurement"+db+"."+string(point.Name()))
+
+	if h.authService != nil {
+		user, err := authenticate(r, h.authService)
+		if user == nil {
+			// The user must be authenticated to write.
+			err = meta.ErrAuthenticate
+		}
+		if err != nil {
+			handleErrorWithCode(w, err, http.StatusUnauthorized)
 			return
+		}
+
+		if !user.AuthorizeDatabase(influxql.WritePrivilege, db) {
+			jsonError(w, http.StatusForbidden, "forbidden to write to database: "+db) // TODO Get the corret error message
+			return
+		}
+		for _, point := range points {
+			if !user.AuthorizeSeriesWrite(db, point.Name(), point.Tags()) {
+				jsonError(w, http.StatusForbidden, "forbidden to write to measurement "+db+"."+string(point.Name()))
+				return
+			}
 		}
 	}
 
@@ -112,6 +119,7 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, fmt.Sprintf("One ore more writes failed: %s", writeErr.Error()))
 		return
 	}
+	fmt.Printf("Wrote %d points", len(points))
 
 	w.WriteHeader(http.StatusNoContent)
 }

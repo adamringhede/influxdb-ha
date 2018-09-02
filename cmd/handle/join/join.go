@@ -1,4 +1,4 @@
-package main
+package join
 
 import (
 	"log"
@@ -18,26 +18,27 @@ func tokensToString(tokens []int, sep string) string {
 	return strings.Join(res, sep)
 }
 
-func join(localNode *cluster.Node, tokenStorage cluster.LockableTokenStorage, nodeStorage cluster.NodeStorage, resolver *cluster.Resolver, importer syncing.Importer) {
+func Join(localNode *cluster.Node, tokenStorage cluster.LockableTokenStorage, nodeStorage cluster.NodeStorage, resolver *cluster.Resolver, importer syncing.Importer) error {
 	mtx, err := tokenStorage.Lock()
-	handleErr(err)
+	if err != nil {
+		return err
+	}
 	defer mtx.Unlock(context.Background())
 
 	isFirstNode, err := tokenStorage.InitMany(localNode.Name, 16) // this may have failed for the first node.
 	if err != nil {
-		log.Println("Initiation of tokens failed")
-		handleErr(err)
+		return err
 	}
 	if !isFirstNode {
 		err = joinExisting(localNode, tokenStorage, resolver, importer)
-		handleErr(err)
+		if err != nil {
+			return err
+		}
 	}
 	localNode.Status = cluster.NodeStatusUp
 	err = nodeStorage.Save(localNode)
 	// If this fails, the node will be stuck in the wrong state unable to receive writes
-	if err != nil {
-		panic(err)
-	}
+	return err
 }
 
 // joinExisting takes tokens belonging to other nodes and starts importing data. This function is idempotent and can be called on multiple
@@ -47,7 +48,6 @@ func joinExisting(localNode *cluster.Node, tokenStorage cluster.LockableTokenSto
 	if err != nil {
 		return err
 	}
-	handleErr(err)
 	var reserved []int
 	for _, tokenToSteal := range toSteal {
 

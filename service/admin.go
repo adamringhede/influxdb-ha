@@ -71,6 +71,7 @@ func (h *ClusterHandler) checkAccess(w http.ResponseWriter, r *http.Request) boo
 
 func handleInternalError(w http.ResponseWriter, err error) {
 	if err != nil {
+		println("Handler Error:" + err.Error())
 		jsonError(w, http.StatusInternalServerError, err.Error())
 	}
 }

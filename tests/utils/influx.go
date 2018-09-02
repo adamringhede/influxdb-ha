@@ -16,6 +16,8 @@ const TestDB = "sharded"
 func NewClient(location string) influx.Client {
 	c, err := influx.NewHTTPClient(influx.HTTPConfig{
 		Addr: "http://" + location,
+		Username: "admin",
+		Password: "password",
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -87,5 +89,8 @@ func WritePoints(points []*influx.Point, clnt influx.Client) {
 	for _, pt := range points {
 		bp.AddPoint(pt)
 	}
-	clnt.Write(bp)
+	err = clnt.Write(bp)
+	if err != nil {
+		panic(err)
+	}
 }

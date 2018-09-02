@@ -74,7 +74,7 @@ func SuggestReservations(tokenStorage TokenStorage) ([]int, error) {
 	for len(suggestions) < avgTokens {
 		for name, tokens := range nodeTokens {
 			suggestions = append(suggestions, tokens[0])
-			nodeTokens[name] = tokens[2:]
+			nodeTokens[name] = tokens[1:]
 		}
 	}
 	return suggestions, nil
@@ -88,6 +88,7 @@ func (s *EtcdTokenStorage) Assign(token int, node string) error {
 
 // Get return a map of all tokens and the nodes they refer to.
 func (s *EtcdTokenStorage) Get() (map[int]string, error) {
+	// TODO Try again if it fails.
 	resp, getErr := s.Client.Get(context.Background(), s.path(etcdStorageTokens),
 		clientv3.WithPrefix(), clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if getErr != nil {

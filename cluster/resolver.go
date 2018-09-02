@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -133,8 +134,10 @@ func (r *Resolver) RemoveAllTokens() {
 func (r *Resolver) AddToken(token int, node *Node) {
 	p := &Partition{token, node}
 	r.collection.Put(p)
-	if _, exists := r.nodes.Get(node.Name); !exists {
-		r.nodes.Persist(*node)
+	if node != nil {
+		if _, exists := r.nodes.Get(node.Name); !exists {
+			r.nodes.Persist(*node)
+		}
 	}
 }
 
@@ -191,7 +194,8 @@ func (c *ResolverSyncer) updateFromStorage() error {
 		if node, ok := c.nodes.Get(nodeName); ok {
 			c.resolver.AddToken(token, &node)
 		} else {
-			log.Fatalf("Could not find a node with name '%s'", nodeName)
+			fmt.Printf("Warning: Could not find a node with name '%s'. This token should be reassigned to another node before removing the node.", nodeName)
+			c.resolver.AddToken(token, nil)
 		}
 	}
 	return nil

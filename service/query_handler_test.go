@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
-	)
+)
 
 func TestQueryHandler_Coordinator_DistributeQueryAndAggregateResults(t *testing.T) {
 	handler := setUpSelectTest()
@@ -41,8 +41,8 @@ func TestQueryHandler_Admin_GrandAdmin(t *testing.T) {
 	// The first request has to be creating the admin user
 	mustNotQueryCluster(t, handler, `SHOW DATABASES`)
 
-	// Creating an admin user should work
-	mustQueryCluster(t, handler, `CREATE USER admin WITH PASSWORD 'password' WITH ALL PRIVILEGES`)
+	// Creating an admin user should work. Credentials will be ignored if they are part of the request
+	mustQueryClusterAuth(t, handler, `CREATE USER admin WITH PASSWORD 'password' WITH ALL PRIVILEGES`, "admin:password")
 
 	// But then it should stop working
 	mustNotQueryCluster(t, handler, `CREATE USER admin2 WITH PASSWORD 'password' WITH ALL PRIVILEGES`)
@@ -60,8 +60,9 @@ func TestQueryHandler_Admin_GrandAdmin(t *testing.T) {
 	// Now it should work
 	mustQueryClusterAuth(t, handler, `SHOW USERS`, "adam:password")
 
-	_, err := storage.Get()
+	data, err := storage.Get()
 	assert.NoError(t, err)
+	assert.Len(t, data.Users, 2)
 }
 
 func newTestResolver() *cluster.Resolver {

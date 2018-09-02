@@ -20,18 +20,21 @@ type AuthService interface {
 	HasAdmin() bool
 }
 
+// authenticate verifies that the user exists and that the password is correct.
+// If the user does not exist, and an admin has not yet been set, it will return
+// nil for the user and nil for the error as it is a valid state.
 func authenticate(r *http.Request, authService AuthService) (*cluster.UserInfo, error) {
-	if username, password, ok := r.BasicAuth(); ok {
-		user := authService.User(username)
-		if user == nil {
-			return nil, meta.ErrAuthenticate
-		}
-		if bcrypt.CompareHashAndPassword([]byte(user.Hash), []byte(password)) != nil {
-			return nil, meta.ErrAuthenticate
-		}
-		return user, nil
-	}
 	if authService.HasAdmin() {
+		if username, password, ok := r.BasicAuth(); ok {
+			user := authService.User(username)
+			if user == nil {
+				return nil, meta.ErrAuthenticate
+			}
+			if bcrypt.CompareHashAndPassword([]byte(user.Hash), []byte(password)) != nil {
+				return nil, meta.ErrAuthenticate
+			}
+			return user, nil
+		}
 		return nil, meta.ErrAuthenticate
 	}
 	return nil, nil
@@ -234,7 +237,7 @@ func HandleAuthStatement(stmt influxql.Statement, authService AuthService) (resu
 		for _, user := range authService.Users() {
 			values = append(values, []interface{}{user.Name, user.Admin})
 		}
-		results = append(results, createListResults("", []string{"user", "admin"}, values)...)
+		results = createListResults("", []string{"user", "admin"}, values)
 	}
 	return
 }

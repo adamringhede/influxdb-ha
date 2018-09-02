@@ -132,7 +132,8 @@ func (i *BasicImporter) Import(tokens []int, resolver *cluster.Resolver, target 
 			})
 		}
 	}
-	log.Println("Finished import")
+	// TODO check that import worked
+	// If no location is available at this time, then we have to try again later.
 }
 
 func (i *BasicImporter) ensureCache() {

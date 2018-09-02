@@ -107,9 +107,8 @@ func (s *EtcdHintStorage) GetByTarget(target string) (map[string]HintStatus, err
 func WaitUntilRecovered(storage *EtcdHintStorage, nodeName string) chan struct{} {
 	hints, _ := storage.GetByTarget(nodeName)
 	doneCh := make(chan struct{}, 1)
-	watchCh := storage.Watch()
 watch:
-	for update := range watchCh {
+	for update := range storage.Watch() {
 		for _, event := range update.Events {
 			parts := strings.Split(string(event.Kv.Key), "/")
 			holder := parts[len(parts)-1]
