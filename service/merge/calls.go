@@ -1,8 +1,9 @@
 package merge
 
 import (
-	"strconv"
+	"fmt"
 	"math"
+	"strconv"
 )
 
 type Values struct {
@@ -37,6 +38,104 @@ func (n *MovingAverage) Next(source ResultSource) []float64 {
 		}
 	}
 	return []float64{totalSum / totalCount}
+}
+
+type Percentile struct {
+	percentiles *Values
+	counts *Values
+}
+
+func NewPercentile(fieldKey string, p float64, qb *QueryBuilder) *Percentile {
+	return &Percentile{
+		qb.Get(fmt.Sprintf("percentile(%s, %f.5)", fieldKey, p)),
+		qb.Get("count(" + fieldKey + ")"),
+	}
+}
+
+func (n *Percentile) Next(source ResultSource) []float64 {
+	values := n.percentiles.Next(source)
+	counts := n.counts.Next(source)
+	var totalSum float64
+	var totalCount float64
+	for i, value := range values {
+		if counts[i] > 0 {
+			totalSum += value * counts[i]
+			totalCount += counts[i]
+		}
+	}
+	return []float64{totalSum / totalCount}
+}
+
+type Median struct {
+	medians *Values
+	counts *Values
+}
+
+
+func NewMedian(fieldKey string, qb *QueryBuilder) *Percentile {
+	return &Percentile{
+		qb.Get(fmt.Sprintf("median(%s)", fieldKey)),
+		qb.Get("count(" + fieldKey + ")"),
+	}
+}
+
+func (n *Median) Next(source ResultSource) []float64 {
+	values := n.medians.Next(source)
+	counts := n.counts.Next(source)
+	var totalSum float64
+	var totalCount float64
+	for i, value := range values {
+		if counts[i] > 0 {
+			totalSum += value * counts[i]
+			totalCount += counts[i]
+		}
+	}
+	return []float64{totalSum / totalCount}
+}
+
+type Stddev struct {
+	stds *Values
+	counts *Values
+}
+
+
+func NewStddev(fieldKey string, qb *QueryBuilder) *Stddev {
+	return &Stddev{
+		qb.Get(fmt.Sprintf("stddev(%s)", fieldKey)),
+		qb.Get("count(" + fieldKey + ")"),
+	}
+}
+
+func (n *Stddev) Next(source ResultSource) []float64 {
+	values := n.stds.Next(source)
+	counts := n.counts.Next(source)
+	var totalSum float64
+	var totalCount float64
+	for i, value := range values {
+		if counts[i] > 0 {
+			totalSum += value * counts[i]
+			totalCount += counts[i]
+		}
+	}
+	return []float64{totalSum / totalCount}
+}
+
+
+type Sample struct {
+	values *Values
+	count int
+}
+
+func NewSample(fieldKey string, count int, qb *QueryBuilder) *Sample {
+	return &Sample{
+		qb.Get("sample(" + fieldKey + ", " + strconv.Itoa(count) + ")"),
+		count,
+	}
+}
+
+func (n *Sample) Next(source ResultSource) []float64 {
+	samples := n.values.Next(source)
+	return samples[:n.count]
 }
 
 type Top struct {

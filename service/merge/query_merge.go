@@ -149,10 +149,17 @@ func createQueryNode(expr influxql.Expr, qb *QueryBuilder) (QueryNode, error) {
 		case "moving_average":
 			width, _ := strconv.Atoi(f.Args[1].String())
 			n = NewMovingAverage(f.Args[0].String(), width, qb)
+		case "percentile":
+			p, _ := strconv.ParseFloat(f.Args[1].String(), 64)
+			n = NewPercentile(f.Args[0].String(), p, qb)
+		case "median":
+			n = NewMedian(f.Args[0].String(), qb)
+		case "stddev":
+			n = NewStddev(f.Args[0].String(), qb)
 		default:
 			/*
 				Not supported:
-				integral, median, stddev, sample, percentile, first, last, moving avg,
+				integral, sample, first, last,
 				as well as all transformations
 
 				First and Last can not be supported as ResultSource.Next only return values and
