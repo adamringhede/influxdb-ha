@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,12 +37,13 @@ type LocalRecoveryStorage struct {
 	hints HintStorage
 	// files contain file descriptors for writing data used for node recovery
 	files map[string]*os.File
+	mtx sync.Mutex
 }
 
 // NewLocalRecoveryStorage create a LocalRecoveryStorage for saving data at the specified path in different files.
 // A hint storage can be provided in order to save where data is placed for recovery.
 func NewLocalRecoveryStorage(path string, hs HintStorage) *LocalRecoveryStorage {
-	return &LocalRecoveryStorage{path, hs, map[string]*os.File{}}
+	return &LocalRecoveryStorage{path, hs, map[string]*os.File{}, sync.Mutex{}}
 }
 
 func (s *LocalRecoveryStorage) getFilePath(nodeName, db, rp string) string {
@@ -49,6 +51,8 @@ func (s *LocalRecoveryStorage) getFilePath(nodeName, db, rp string) string {
 }
 
 func (s *LocalRecoveryStorage) getOrCreateFile(nodeName, db, rp string) (*os.File, error) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
 	fp := s.getFilePath(nodeName, db, rp)
 	if f, ok := s.files[nodeFileKey(nodeName, fp)]; ok {
 		return f, nil
