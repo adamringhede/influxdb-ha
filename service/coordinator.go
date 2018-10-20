@@ -3,15 +3,15 @@ package service
 import (
 	"fmt"
 	"log"
-		"net/http"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/adamringhede/influxdb-ha/cluster"
-	"github.com/adamringhede/influxdb-ha/service/merge"
-	"github.com/influxdata/influxql"
-	"github.com/influxdata/influxdb/models"
 	"github.com/adamringhede/influxdb-ha/hash"
+	"github.com/adamringhede/influxdb-ha/service/merge"
+	"github.com/influxdata/influxdb/models"
+	"github.com/influxdata/influxql"
 )
 
 // Coordinator handles a SELECT query using partition keys and a resolver.
@@ -142,11 +142,10 @@ func mergeQueryResults(groupedResults map[string][]Result, tree *merge.QueryTree
 			Columns: []string{"time"}, // TODO make sure to add the columns from the results and that they are in the same order
 			Values:  [][]interface{}{},
 		}}
+		for _, f := range tree.Fields {
+			merged.Series[0].Columns = append(merged.Series[0].Columns, f.ResponseField)
+		}
 		for src.Reset(); !src.Done(); src.Step() {
-			for _, f := range tree.Fields {
-				merged.Series[0].Columns = append(merged.Series[0].Columns, f.ResponseField)
-			}
-
 			value := []interface{}{src.Time()}
 			for _, f := range tree.Fields {
 				switch f.Root.(type) {
@@ -154,7 +153,13 @@ func mergeQueryResults(groupedResults map[string][]Result, tree *merge.QueryTree
 					// TODO Add support for adding multiple values. Note that in 1.3 is is no longe possible to use
 					// both aggregations function and top/bottom which makes this easier.
 				}
-				value = append(value, f.Root.Next(src)[0])
+				calculatedValues := f.Root.Next(src)
+				if len(calculatedValues) > 0 {
+					value = append(value, calculatedValues[0])
+				} else {
+					value = append(value, nil)
+				}
+
 			}
 			merged.Series[0].Values = append(merged.Series[0].Values, value)
 		}
@@ -221,6 +226,8 @@ func (c *Coordinator) Handle(stmt *influxql.SelectStatement, r *http.Request, db
 				return mergedResults, nil, response
 			} else {
 				// Divide the query and merge the results
+				// TODO To support wildcards, the stmt needs to be changed to include all matching fields; that is, the field that includes a wildcard needs to be copied for all matching fields.
+				// TODO this requires finding all field names that exist on the selected measurement. For performance resasons, this should preferably be cached.
 				tree, qb, err := merge.NewQueryTree(stmt)
 				if err != nil {
 					return []Result{}, err, nil
@@ -423,21 +430,24 @@ func NewResultSource(results []Result) *ResultSource {
 		fieldIndices: map[string]int{},
 	}
 
-	// Group values by time and ensure order. This assumes that both results have the exact same time-steps and
-	// that times are strings. TODO They may be floats. Need to fix this
+	// Group values by time and ensure order.
 	a := map[string]int{}
 	ai := 0
 	for _, res := range results {
 		for _, series := range res.Series {
 			for _, v := range series.Values {
-				k := string(v[0].(string))
+				var k string
+				if _, isString := v[0].(string); isString {
+					k = string(v[0].(string))
+				} else {
+					k = fmt.Sprintf("%f", v[0].(float64))
+				}
 				if _, ok := a[k]; !ok {
 					source.data = append(source.data, resultGroup{k, []interface{}{}})
 					a[k] = ai
 					ai += 1
 				}
-				group := source.data[a[k]]
-				source.data[a[k]].values = append(group.values, v)
+				source.data[a[k]].values = append(source.data[a[k]].values, v)
 			}
 		}
 	}
@@ -450,7 +460,7 @@ func NewResultSource(results []Result) *ResultSource {
 }
 
 func (s *ResultSource) Next(fieldKey string) []float64 {
-	res := make([]float64, len(s.data[s.i].values))
+	var res []float64
 	fieldIndex, fieldExists := s.fieldIndices[fieldKey]
 	if !fieldExists {
 		panic(fmt.Errorf("No values exist for field key %s", fieldKey))
@@ -458,15 +468,15 @@ func (s *ResultSource) Next(fieldKey string) []float64 {
 	if s.Done() {
 		return res
 	}
-	for i, v := range s.data[s.i].values {
+	for _, v := range s.data[s.i].values {
 		if data, ok := v.([]interface{}); ok {
 			switch value := data[fieldIndex].(type) {
 			case int:
-				res[i] = float64(value)
+				res = append(res, float64(value))
 			case float64:
-				res[i] = value
+				res = append(res, value)
 			case nil:
-				res[i] = 0
+				continue
 			default:
 				panic(fmt.Errorf("Unsupported type %T", value))
 			}

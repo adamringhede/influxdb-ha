@@ -29,6 +29,9 @@ func NewMovingAverage(fieldKey string, n int, qb *QueryBuilder) *MovingAverage {
 func (n *MovingAverage) Next(source ResultSource) []float64 {
 	values := n.values.Next(source)
 	counts := n.counts.Next(source)
+	if len(values) == 0 {
+		return nil
+	}
 	var totalSum float64
 	var totalCount float64
 	for i, value := range values {
@@ -55,6 +58,9 @@ func NewPercentile(fieldKey string, p float64, qb *QueryBuilder) *Percentile {
 func (n *Percentile) Next(source ResultSource) []float64 {
 	values := n.percentiles.Next(source)
 	counts := n.counts.Next(source)
+	if len(values) == 0 {
+		return nil
+	}
 	var totalSum float64
 	var totalCount float64
 	for i, value := range values {
@@ -82,6 +88,9 @@ func NewMedian(fieldKey string, qb *QueryBuilder) *Percentile {
 func (n *Median) Next(source ResultSource) []float64 {
 	values := n.medians.Next(source)
 	counts := n.counts.Next(source)
+	if len(values) == 0 {
+		return nil
+	}
 	var totalSum float64
 	var totalCount float64
 	for i, value := range values {
@@ -109,6 +118,9 @@ func NewStddev(fieldKey string, qb *QueryBuilder) *Stddev {
 func (n *Stddev) Next(source ResultSource) []float64 {
 	values := n.stds.Next(source)
 	counts := n.counts.Next(source)
+	if len(values) == 0 {
+		return nil
+	}
 	var totalSum float64
 	var totalCount float64
 	for i, value := range values {
@@ -135,7 +147,7 @@ func NewSample(fieldKey string, count int, qb *QueryBuilder) *Sample {
 
 func (n *Sample) Next(source ResultSource) []float64 {
 	samples := n.values.Next(source)
-	return samples[:n.count]
+	return samples[:minInt(n.count, len(samples))]
 }
 
 type Top struct {
@@ -152,7 +164,8 @@ func NewTop(fieldKey string, count int, qb *QueryBuilder) *Top {
 
 func (n *Top) Next(source ResultSource) []float64 {
 	tops := n.tops.Next(source)
-	for i := 0; i < n.count; i++ {
+	l := minInt(n.count, len(tops))
+	for i := 0; i < l; i++ {
 		maxIndex := i
 		maxValue := tops[i]
 		for j := i + 1; j < len(tops); j++ {
@@ -163,7 +176,15 @@ func (n *Top) Next(source ResultSource) []float64 {
 			}
 		}
 	}
-	return tops[:n.count]
+	return tops[:l]
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	} else {
+		return b
+	}
 }
 
 type Bottom struct {
@@ -180,7 +201,8 @@ func NewBottom(fieldKey string, count int, qb *QueryBuilder) *Bottom {
 
 func (n *Bottom) Next(source ResultSource) []float64 {
 	bottoms := n.bottoms.Next(source)
-	for i := 0; i < n.count; i++ {
+	l := minInt(n.count, len(bottoms))
+	for i := 0; i < l; i++ {
 		minIndex := i
 		minValue := bottoms[i]
 		for j := i + 1; j < len(bottoms); j++ {
@@ -191,7 +213,7 @@ func (n *Bottom) Next(source ResultSource) []float64 {
 			}
 		}
 	}
-	return bottoms[:n.count]
+	return bottoms[:l]
 }
 
 type Spread struct {
@@ -207,16 +229,21 @@ func NewSpread(fieldKey string, qb *QueryBuilder) *Spread {
 }
 
 func (n *Spread) Next(source ResultSource) []float64 {
+	maxs := n.maxs.Next(source)
+	mins := n.mins.Next(source)
+	if len(mins) == 0 || len(maxs) == 0 {
+		return nil
+	}
 	var max = -math.MaxFloat64
-	for _, v := range n.maxs.Next(source) {
+	for _, v := range maxs {
 		if v > max {
 			max = v
 		}
 	}
 	var min = math.MaxFloat64
-	for _, v := range n.mins.Next(source) {
+	for _, v := range mins{
 		if v < min {
-			max = v
+			min = v
 		}
 	}
 	return []float64{max-min}
@@ -233,8 +260,12 @@ func NewDistinct(fieldKey string, qb *QueryBuilder) *Distinct {
 }
 
 func (n *Distinct) Next(source ResultSource) []float64 {
+	distincts := n.distinct.Next(source)
+	if len(distincts) == 0 {
+		return nil
+	}
 	unique := map[float64]bool{}
-	for _, v := range n.distinct.Next(source) {
+	for _, v := range distincts {
 		unique[v] = true
 	}
 	distinct := make([]float64, len(unique))
@@ -259,6 +290,9 @@ func NewMean(fieldKey string, qb *QueryBuilder) *Mean {
 func (n *Mean) Next(source ResultSource) []float64 {
 	sums := n.sums.Next(source)
 	counts := n.counts.Next(source)
+	if len(counts) == 0 {
+		return nil
+	}
 	var totalSum float64
 	var totalCount float64
 	for i, sum := range sums {
@@ -280,6 +314,9 @@ func NewMode(fieldKey string, qb *QueryBuilder) *Mode {
 
 func (n *Mode) Next(source ResultSource) []float64 {
 	modes := n.modes.Next(source)
+	if len(modes) == 0 {
+		return []float64{}
+	}
 	m := map[float64]int{}
 	maxCount := 0
 	var mode float64
@@ -306,8 +343,12 @@ func NewCount(fieldKey string, qb *QueryBuilder) *Count {
 }
 
 func (n *Count) Next(source ResultSource) []float64 {
+	counts := n.counts.Next(source)
+	if len(counts) == 0 {
+		return []float64{}
+	}
 	var sum float64
-	for _, v := range n.counts.Next(source) {
+	for _, v := range counts{
 		sum += v
 	}
 	return []float64{sum}
@@ -318,8 +359,12 @@ type Max struct {
 }
 
 func (n *Max) Next(source ResultSource) []float64 {
+	maxes := n.maxes.Next(source)
+	if len(maxes) == 0 {
+		return []float64{}
+	}
 	var max float64
-	for _, v := range n.maxes.Next(source) {
+	for _, v := range maxes {
 		if v > max {
 			max = v
 		}

@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/adamringhede/influxdb-ha/service/merge"
-	"github.com/influxdata/influxql"
 	"github.com/influxdata/influxdb/models"
+	"github.com/influxdata/influxql"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -74,7 +74,7 @@ func TestMergeSortRfcDates(t *testing.T) {
 func TestMergeSortIntDates(t *testing.T) {
 	timeDates1 := [][]interface{}{{0.}, {3.}, {10.}}
 	timeDates2 := [][]interface{}{{0.}, {1.}, {4.}}
-	expected := [][]interface{}{{0.}, {0.}, {1.}, {3.}, {4.}, {10.}}
+	expected := [][]interface{}{{0.}, {1.}, {3.}, {4.}, {10.}}
 
 	sortedResults := mergeSortResults(map[string][]Result{
 		"": {createTestResult(timeDates1), createTestResult(timeDates2)},
@@ -129,6 +129,46 @@ func Test_mergeResults(t *testing.T) {
 	tree, _, err = merge.NewQueryTree(stmt)
 	assert.NoError(t, err)
 	assert.Equal(t, []float64{4}, tree.Fields[0].Root.Next(source))
+}
+
+func TestMergingResults(t *testing.T) {
+	a := Result{Series: []*models.Row{
+		{
+			Columns: []string{"time", "top_value__1_", "max_value_", "min_value_"},
+			Values: [][]interface{}{
+				{"1970-01-01T00:00:00Z", 5.0, 5.0, 0.0},
+				{"1970-01-02T00:00:00Z", nil, nil, nil},
+				{"1970-01-03T00:00:00Z", nil, nil, nil},
+				{"1970-01-04T00:00:00Z", nil, nil, nil},
+			}},
+	}}
+
+	b := Result{Series: []*models.Row{
+		{
+			Columns: []string{"time", "top_value__1_"},
+			Values: [][]interface{}{
+				{"1970-01-01T00:00:00Z", nil, nil, nil},
+				{"1970-01-02T00:00:00Z", nil, nil, nil},
+				{"1970-01-03T00:00:00Z", 12.0, 12.0, 0.0},
+				{"1970-01-04T00:00:00Z", nil, nil, nil},
+			}},
+	}}
+
+	stmt := mustGetSelect(`SELECT max(value), spread(value) FROM sales where time < now() group by time(1d) `)
+	tree, _, err := merge.NewQueryTree(stmt)
+	assert.NoError(t, err)
+
+	groupedResults := groupResultsByTags([][]Result{{a, b}})
+	merged := mergeQueryResults(groupedResults, tree)
+	assert.Equal(t,5.,  merged[0].Series[0].Values[0][1])
+	assert.Nil(t, merged[0].Series[0].Values[1][1])
+	assert.Equal(t,12.,  merged[0].Series[0].Values[2][1])
+	assert.Nil(t, merged[0].Series[0].Values[3][1])
+
+	assert.Equal(t,5.,  merged[0].Series[0].Values[0][2])
+	assert.Nil(t, merged[0].Series[0].Values[1][2])
+	assert.Equal(t,12.,  merged[0].Series[0].Values[2][2])
+	assert.Nil(t, merged[0].Series[0].Values[3][2])
 }
 
 func mustGetSelect(q string) *influxql.SelectStatement {
