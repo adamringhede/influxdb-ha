@@ -44,6 +44,7 @@ func TestMergeSortRfcDates(t *testing.T) {
 
 	rfcDates1 := [][]interface{}{
 		{"1970-01-01T00:00:00Z"},
+		{"1970-01-01T00:00:00Z"}, // duplicates should be removed
 		{"1971-01-01T00:00:00Z"},
 		{"1973-01-01T00:00:00Z"},
 	}

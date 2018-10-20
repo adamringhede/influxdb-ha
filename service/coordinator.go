@@ -81,6 +81,7 @@ func timeGreaterThan(a, b string) bool {
 func mergeSortResults(groupedResults map[string][]Result, less compareLess) []Result {
 	mergedResults := []Result{}
 	for _, group := range groupedResults {
+		uniquePoints := make(map[string]bool, sumResultCounts(group))
 		merged := Result{}
 		merged.Series = []*models.Row{{
 			Columns: []string{},        // TODO make sure to set column and that they are in the same order from the results
@@ -101,7 +102,12 @@ func mergeSortResults(groupedResults map[string][]Result, less compareLess) []Re
 				}
 			}
 			if len(group[min].Series[0].Values) > 0 {
-				merged.Series[0].Values = append(merged.Series[0].Values, group[min].Series[0].Values[0])
+				toAdd := group[min].Series[0].Values[0]
+				toAddHash := hashPoint(toAdd)
+				if _, alreadyAdded := uniquePoints[toAddHash]; !alreadyAdded {
+					merged.Series[0].Values = append(merged.Series[0].Values, toAdd)
+					uniquePoints[toAddHash] = true
+				}
 				group[min].Series[0].Values = group[min].Series[0].Values[1:]
 			}
 		}
@@ -109,6 +115,22 @@ func mergeSortResults(groupedResults map[string][]Result, less compareLess) []Re
 
 	}
 	return mergedResults
+}
+
+func hashPoint(point []interface{}) string {
+	var hashBuilder strings.Builder
+	for _, p := range point {
+		hashBuilder.WriteString(fmt.Sprint(p))
+	}
+	return hashBuilder.String()
+}
+
+func sumResultCounts(results []Result) int {
+	var sum int
+	for _, result := range results {
+		sum += len(result.Series[0].Values)
+	}
+	return sum
 }
 
 func mergeQueryResults(groupedResults map[string][]Result, tree *merge.QueryTree) []Result {
