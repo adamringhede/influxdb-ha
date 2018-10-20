@@ -5,12 +5,12 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"errors"
+	"github.com/coreos/etcd/mvcc/mvccpb"
 	"log"
 	"math/rand"
 	"os"
 	"strconv"
-
-	"github.com/coreos/etcd/mvcc/mvccpb"
+	"time"
 )
 
 type NodeStatus int
@@ -214,6 +214,7 @@ func (c *SyncedNodeCollection) Get(name string) (Node, bool) {
 }
 
 func (c *SyncedNodeCollection) trackUpdates() {
+	ticker := time.NewTicker(10 * time.Second)
 	for {
 		select {
 		case update := <-c.storage.Watch():
@@ -232,6 +233,8 @@ func (c *SyncedNodeCollection) trackUpdates() {
 					}
 				}
 			}
+		case <-ticker.C:
+			c.updateFromStorage()
 		case <-c.closeCh:
 			return
 		}
