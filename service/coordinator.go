@@ -188,7 +188,7 @@ func (c *Coordinator) Handle(stmt *influxql.SelectStatement, r *http.Request, db
 					return []Result{}, err, nil
 				}
 				groupedResults := groupResultsByTags(allResults)
-				precision := r.URL.Query().Get("precision")
+				precision := r.URL.Query().Get("epoch")
 				var less compareLess
 				if precision == "" || strings.ToUpper(precision) == "RFC3339" {
 					less = lessRfc
