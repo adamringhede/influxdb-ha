@@ -9,6 +9,7 @@ import (
 )
 
 func TestRemoveNode(t *testing.T) {
+	initWithNodes()
 	handle := utils.NewClient("192.168.99.100:8086")
 
 	utils.WritePoints([]*influx.Point{
@@ -35,6 +36,7 @@ func TestRemoveNode(t *testing.T) {
 }
 
 func TestRemoveNodeWhenOthersAreDown(t *testing.T) {
+	initWithNodes()
 	handle := utils.NewClient("192.168.99.100:8086")
 
 	utils.WritePoints([]*influx.Point{

@@ -13,6 +13,8 @@ import (
 
 // TestRecovery tests that data not written to the stopped node will then be rewritten when that node becomes alive.
 func TestRecovery(t *testing.T) {
+	initWithNodes()
+
 	handle := utils.NewClient("192.168.99.100:8086")
 
 	// write against the handle, not the db.
@@ -56,7 +58,7 @@ func assertData(t *testing.T, clnt influx.Client, count int) {
 
 }
 
-func init() {
+func initWithNodes() {
 	for _, node := range utils.Nodes {
 		utils.StartNode(node)
 	}
