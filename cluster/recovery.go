@@ -221,8 +221,7 @@ func recoverNode(node Node, data RecoveryStorage) error {
 }
 
 func isAlive(location string, client *http.Client) bool {
-	values, _ := url.ParseQuery("q=SHOW DATABASES")
-	resp, err := client.Get("http://" + location + "/query?" + values.Encode())
+	resp, err := client.Get("http://" + location + "/ping")
 	return err == nil && resp.StatusCode >= 200 && resp.StatusCode <= 299
 }
 
