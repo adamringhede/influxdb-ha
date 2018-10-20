@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"compress/gzip"
 	"fmt"
 	"github.com/influxdata/influxdb/services/meta"
 	"io/ioutil"
@@ -48,9 +49,29 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if precision == "" {
 		precision = "nanoseconds"
 	}
+	body := r.Body
 
-	buf, err := ioutil.ReadAll(r.Body)
-	points, err := models.ParsePoints(buf)
+	// Handle gzip decoding of the body
+	if r.Header.Get("Content-Encoding") == "gzip" {
+		b, err := gzip.NewReader(r.Body)
+		if err != nil {
+			jsonError(w, http.StatusBadRequest, "unable to parse points")
+			return
+		}
+		defer b.Close()
+		body = b
+	}
+
+	var bs []byte
+	if r.ContentLength > 0 {
+		// This will just be an initial hint for the gzip reader, as the
+		// bytes.Buffer will grow as needed when ReadFrom is called
+		bs = make([]byte, 0, r.ContentLength)
+	}
+	buf := bytes.NewBuffer(bs)
+	_, err := buf.ReadFrom(body)
+
+	points, err := models.ParsePoints(buf.Bytes())
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, "unable to parse points")
 		return
