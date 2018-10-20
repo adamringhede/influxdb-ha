@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/coreos/etcd/mvcc/mvccpb"
 )
@@ -156,8 +157,8 @@ type ResolverSyncer struct {
 }
 
 func (r *ResolverSyncer) trackUpdates() {
-	// TODO Consider refreshing completely from the token storage with a regular interval.
-	// Note though that it would need to use a mutex lock to prevent reads.
+	// Periodically
+	ticker := time.NewTicker(5 * time.Second)
 	for {
 		select {
 		case update := <-r.tokens.Watch():
@@ -179,6 +180,8 @@ func (r *ResolverSyncer) trackUpdates() {
 					r.resolver.RemoveToken(token)
 				}
 			}
+			case <-ticker.C:
+				r.updateFromStorage()
 		case <-r.closeCh:
 			return
 		}
