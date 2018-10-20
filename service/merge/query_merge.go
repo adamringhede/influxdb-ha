@@ -3,6 +3,7 @@ package merge
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -122,6 +123,8 @@ func createQueryNode(expr influxql.Expr, qb *QueryBuilder) (QueryNode, error) {
 	var n QueryNode
 	switch f := expr.(type) {
 	// TODO add support for wildcards and regular expressions
+	case *influxql.StringLiteral:
+		n = qb.Get(expr.String())
 	case *influxql.Call:
 		switch f.Name {
 		case "mean":
@@ -156,11 +159,17 @@ func createQueryNode(expr influxql.Expr, qb *QueryBuilder) (QueryNode, error) {
 			n = NewMedian(f.Args[0].String(), qb)
 		case "stddev":
 			n = NewStddev(f.Args[0].String(), qb)
+		case "abs", "acos", "asin", "atan", "ceil", "cos", "floor", "log", "log2", "log10", "round", "sin", "sqrt", "tan":
+			qn, err := createQueryNode(f.Args[0], qb)
+			if err != nil {
+				return nil, err
+			}
+			n = NewUnaryOp(qn, getUnaryOp(f.Name))
 		default:
 			/*
 				Not supported:
 				integral, sample, first, last,
-				as well as all transformations
+				as well as all some transformations.
 
 				First and Last can not be supported as ResultSource.Next only return values and
 				not the timestamps of those value. Need a different function than next that also
@@ -194,6 +203,81 @@ func createQueryNode(expr influxql.Expr, qb *QueryBuilder) (QueryNode, error) {
 		return nil, fmt.Errorf("Unknown expression '%s' of type %T", f.String(), f)
 	}
 	return n, nil
+}
+
+func getUnaryOp(name string) func (float64) float64 {
+	switch name {
+	case "abs":
+		return math.Abs
+	case "acos":
+		return math.Acos
+	case "asin":
+		return math.Asin
+	case "atan":
+		return math.Atan
+	//case "atan2":
+	//	return math.Atan2
+	case "ceil":
+		return math.Ceil
+	case "cos":
+		return math.Cos
+	//case "cumulative_sum":
+	//	return math.cumulative_sum
+	//case "derivative":
+	//	return math.derivative
+	//case "difference":
+	//	return math.difference
+	//case "elapsed":
+	//	return math.elapsed
+	//case "exp":
+	//	return math.exp
+	case "floor":
+		return math.Floor
+	//case "histogram":
+	//	return math.histogram
+	//case "ln":
+	//	return math.Ln10
+	case "log":
+		return math.Log
+	case "log2":
+		return math.Log2
+	case "log10":
+		return math.Log10
+	//case "non_negative_derivative":
+	//	return math.non_negative_derivative
+	//case "non_negative_difference":
+	//	return math.non_negative_difference
+	//case "pow":
+	//	return math.pow
+	case "round":
+		return math.Round
+	case "sin":
+		return math.Sin
+	case "sqrt":
+		return math.Sqrt
+	case "tan":
+		return math.Tan
+	}
+	return func (value float64) float64 {
+		return value
+	}
+}
+
+type UnaryOp struct {
+	values QueryNode
+	fn func (float64) float64
+}
+
+func NewUnaryOp(qn QueryNode, fn func (float64) float64) *UnaryOp {
+	return &UnaryOp{qn, fn}
+}
+
+func (n *UnaryOp) Next(source ResultSource) []float64 {
+	values := n.values.Next(source)
+	for i, v := range values {
+		values[i] = n.fn(v)
+	}
+	return values
 }
 
 type FloatLit struct {
