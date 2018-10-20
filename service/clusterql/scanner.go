@@ -252,6 +252,8 @@ func (t Token) Repr() string {
 		return "numeric parameter"
 	case LIST:
 		return "comma separated parameters"
+	case WITH:
+		return "WITH"
 	}
 	return ""
 }
