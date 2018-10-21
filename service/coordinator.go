@@ -50,6 +50,10 @@ func groupResultsByTags(allResults [][]Result) map[string][]Result {
 	// Group allResults by combination of tags
 	for _, results := range allResults {
 		for _, res := range results {
+			// Don't include empty results
+			if len(res.Series) == 0 || len(res.Series[0].Values) == 0 {
+				continue
+			}
 			tagsKey := ""
 			if len(res.Series) > 0 {
 				for key, value := range res.Series[0].Tags {

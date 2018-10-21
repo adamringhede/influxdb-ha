@@ -171,6 +171,31 @@ func TestMergingResults(t *testing.T) {
 	assert.Nil(t, merged[0].Series[0].Values[3][2])
 }
 
+func TestMergingEmptyResults(t *testing.T) {
+	a := Result{Series: []*models.Row{
+		{
+			Columns: []string{"time", "sum_value_"},
+			Values: [][]interface{}{
+				{"1970-01-01T00:00:00Z", 2},
+			}},
+	}}
+
+	b := Result{Series: []*models.Row{
+		{
+			Columns: []string{},
+			Values: [][]interface{}{
+			}},
+	}}
+
+	stmt := mustGetSelect(`SELECT sum(value) FROM sales where time < now()`)
+	tree, _, err := merge.NewQueryTree(stmt)
+	assert.NoError(t, err)
+
+	groupedResults := groupResultsByTags([][]Result{{b, a}})
+	merged := mergeQueryResults(groupedResults, tree)
+	assert.Equal(t,2.,  merged[0].Series[0].Values[0][1])
+}
+
 func mustGetSelect(q string) *influxql.SelectStatement {
 	query, err := influxql.ParseQuery(q)
 	if err != nil {

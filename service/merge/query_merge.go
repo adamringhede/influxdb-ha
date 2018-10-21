@@ -108,6 +108,9 @@ func NewQueryTree(stmt *influxql.SelectStatement) (*QueryTree, *QueryBuilder, er
 	tree.Fields = []QueryField{}
 	qb := NewQueryBuilder()
 	for _, field := range stmt.Fields {
+		if _, isVarRef := field.Expr.(*influxql.VarRef); isVarRef {
+			continue
+		}
 		qField := QueryField{ResponseField: field.Name()}
 		node, err := createQueryNode(field.Expr, qb)
 		if err != nil {
