@@ -58,11 +58,7 @@ func assertData(t *testing.T, clnt influx.Client, count int) {
 
 }
 
-func initWithNodes() {
-	for _, node := range utils.Nodes {
-		utils.StartNode(node)
-	}
-	time.Sleep(time.Millisecond * 200)
+func clearInflux() {
 	clnt1 := utils.NewClient(utils.InfluxOne)
 	clnt2 := utils.NewClient(utils.InfluxTwo)
 	clnt3 := utils.NewClient(utils.InfluxThree)
@@ -71,6 +67,14 @@ func initWithNodes() {
 		utils.MustQuery(clnt, "CREATE DATABASE "+utils.TestDB)
 	}
 	time.Sleep(time.Millisecond * 50)
+}
+
+func initWithNodes() {
+	for _, node := range utils.Nodes {
+		utils.StartNode(node)
+	}
+	time.Sleep(time.Millisecond * 200)
+	clearInflux()
 
 	handle := utils.NewClient("192.168.99.100:8086")
 	utils.Query(handle, "CREATE USER admin WITH PASSWORD 'password' WITH ALL PRIVILEGES")

@@ -94,11 +94,131 @@ func Start(clusterID string, nodeName string, etcdEndpoints string, dataLocation
 	select {}
 }
 
-type Runner struct {
-	// various storage components that can mocked and possibly inspected
-	// starts a bunch of services for syncing data
-	// has various shared components like a resolver, authService, partitioner.
-	// has a logger.
+type Launcher struct {
+	resolver    *cluster.Resolver
+	partitioner cluster.Partitioner
+	recovery    cluster.RecoveryStorage
+	pks         cluster.PartitionKeyStorage
+	ns          cluster.NodeStorage
+	auth        service.AuthService
+	httpConfig  service.Config
+
+	importer     syncing.Importer
+	tokenStorage cluster.LockableTokenStorage
+	localNode    *cluster.Node
+	hintsStorage *cluster.EtcdHintStorage
+	IsNew        bool
+}
+
+func NewLauncher(clusterID string, nodeName string, etcdEndpoints string, dataLocation string, httpConfig service.Config) *Launcher {
+	c, etcdErr := clientv3.New(clientv3.Config{
+		Endpoints:   strings.Split(etcdEndpoints, ","),
+		DialTimeout: etcdTimeout,
+	})
+	handleErr(etcdErr)
+
+	// Setup storage components
+	nodeStorage := cluster.NewEtcdNodeStorage(c)
+	tokenStorage := cluster.NewEtcdTokenStorageWithClient(c)
+	hintsStorage := cluster.NewEtcdHintStorage(c, nodeName)
+	settingsStorage := cluster.NewEtcdSettingsStorage(c)
+	partitionKeyStorage := cluster.NewEtcdPartitionKeyStorage(c)
+	recoveryStorage := cluster.NewLocalRecoveryStorage("./", hintsStorage)
+	authStorage := cluster.NewEtcdAuthStorage(c)
+
+	nodeStorage.ClusterID = clusterID
+	tokenStorage.ClusterID = clusterID
+	hintsStorage.ClusterID = clusterID
+	settingsStorage.ClusterID = clusterID
+	partitionKeyStorage.ClusterID = clusterID
+	authStorage.ClusterID = clusterID
+
+	nodeCollection, err := cluster.NewSyncedNodeCollection(nodeStorage)
+	handleErr(err)
+
+	defaultReplicationFactor, err := settingsStorage.GetDefaultReplicationFactor(2)
+	handleErr(err)
+
+	resolver := cluster.NewResolverWithNodes(nodeCollection)
+	_, err = cluster.NewResolverSyncer(resolver, tokenStorage, nodeCollection)
+	handleErr(err)
+	resolver.ReplicationFactor = defaultReplicationFactor
+
+	partitioner, err := cluster.NewSyncedPartitioner(partitionKeyStorage)
+	handleErr(err)
+
+	localNode, isNew := initLocalNode(dataLocation, nodeName, nodeStorage)
+
+	predicate := syncing.ClusterImportPredicate{
+		LocalNode:     *localNode,
+		PartitionKeys: partitioner,
+		Resolver:      resolver,
+	}
+
+	partitioner.AddKey(cluster.PartitionKey{})
+	importer := syncing.NewImporter(resolver, partitioner, predicate.Test)
+
+	reliableImporter, importWQ := startImporter(importer, c, resolver, *localNode, clusterID)
+	reliableImporter.AfterImport = func(token int) {
+		tokenStorage.Assign(token, localNode.Name)
+	}
+
+	authService := service.NewPersistentAuthService(authStorage)
+
+	// TODO change this to another way of handling node removal in the request handler.
+	nodeStorage.OnRemove(NewClusterNodeDeallocator(nodeCollection, tokenStorage, resolver, hintsStorage, importWQ).Remove)
+
+	go (func() {
+		for rf := range settingsStorage.WatchDefaultReplicationFactor() {
+			resolver.ReplicationFactor = rf
+		}
+	})()
+
+	go cluster.RecoverNodes(hintsStorage, recoveryStorage, nodeCollection)
+	go authService.Sync()
+
+	return &Launcher{
+		resolver,
+		partitioner,
+		recoveryStorage,
+		partitionKeyStorage,
+		nodeStorage,
+		authService,
+		httpConfig,
+		importer,
+		tokenStorage,
+		localNode,
+		hintsStorage,
+		isNew,
+	}
+}
+
+// Run is the main method to start the node
+func (l *Launcher) Run() {
+	go l.Listen()
+	if l.IsNew {
+		err := l.Join()
+		handleErr(err)
+	} else {
+		recoverFailedWrites(l.hintsStorage, l.ns, l.localNode)
+	}
+	l.Await()
+}
+
+func (l *Launcher) Listen() {
+	service.Start(l.resolver, l.partitioner, l.recovery, l.pks, l.ns, l.auth, l.httpConfig)
+}
+
+func (l *Launcher) Join() error {
+	if !l.IsNew {
+		panic("tried to join the cluster with old node")
+	}
+	return Join(l.localNode, l.tokenStorage, l.ns, l.resolver, l.importer)
+}
+
+func (l *Launcher) Await() {
+	// this should stop after the node is removed and all its data has been recovered.
+	select {}
 }
 
 func initLocalNode(dataLocation string, nodeName string, nodeStorage cluster.NodeStorage) (*cluster.Node, bool) {
@@ -205,4 +325,3 @@ func (nd *ClusterNodeDeallocator) Remove(node cluster.Node) {
 		nd.hintsStorage.Done(target)
 	}
 }
-

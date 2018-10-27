@@ -13,6 +13,8 @@ func RouteToAll(resolver *cluster.Resolver, client *http.Client) RoutingFunc {
 	return func(w http.ResponseWriter, r *http.Request, stmt influxql.Statement) []Result {
 		// TODO Ping all replicas to make sure they are reachable before making a meta query.
 		// TODO In case one request fails, store in a log in peristent storage so that the command can be replayed in order
+		// If it is a delete request, it is important that it is applied before recovering new writes.
+		// All these requests which are mutable, should be added to a log that all nodes schould read from the first thing they do on startup after the local influxdb process is reachable.
 		var allResults []Result
 		for _, location := range resolver.FindAll() {
 			results, err, res := request(stmt.String(), location, client, r)

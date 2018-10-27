@@ -22,8 +22,6 @@ type Loader interface {
 	get(q string, location, db, rp string, chunked bool)
 }
 
-// TODO implement a test loader that just returns json
-
 type ImportBatch struct {
 	// index can be used as an offset to continue importing from it.
 	index int
@@ -32,6 +30,7 @@ type ImportBatch struct {
 type Importer interface {
 	Import(tokens []int, resolver *cluster.Resolver, target string)
 	ImportNonPartitioned(resolver *cluster.Resolver, target string)
+	DeleteByToken(location string, token int, resolver *cluster.Resolver) error
 }
 
 type ErrorNoNodeFound struct{ Token int }
@@ -91,6 +90,15 @@ func (p *ClusterImportPredicate) Test(db, msmt string) ImportDecision {
 	return NoImport
 }
 
+func measurementHasPartitionKey(db, msmt string, pks []cluster.PartitionKey) bool {
+	for _, pk := range pks {
+		if pk.Database == db && (pk.Measurement == msmt || pk.Measurement == "") {
+			return true
+		}
+	}
+	return false
+}
+
 type BasicImporter struct {
 	loader        Loader
 	Predicate     ImportDecisionTester
@@ -107,17 +115,20 @@ func NewImporter(resolver *cluster.Resolver, partitionKeys cluster.PartitionKeyC
 }
 
 func (i *BasicImporter) ImportNonPartitioned(resolver *cluster.Resolver, target string) {
-	for _, location := range resolver.FindAll() {
-		i.forEachDatabase(location, target, func(db string, dbMeta *databaseMeta) {
-			for _, msmt := range dbMeta.measurements {
-				if importType := i.Predicate(db, msmt); importType == FullImport {
-					for _, rp := range dbMeta.rps {
-						importCh, _ := streamData(location, db, rp, msmt, "")
-						persistStream(importCh, dbMeta, target, db, rp)
+	for _, location := range resolver.FindAll() { //except self == target
+		if location != target {
+			i.forEachDatabase(location, target, func(db string, dbMeta *databaseMeta) {
+				for _, msmt := range dbMeta.measurements {
+					// TODO only import if there is no partition key
+					if importType := i.Predicate(db, msmt); importType == FullImport {
+						for _, rp := range dbMeta.rps {
+							importCh, _ := streamData(location, db, rp, msmt, "")
+							persistStream(importCh, dbMeta, target, db, rp)
+						}
 					}
 				}
-			}
-		})
+			})
+		}
 	}
 }
 
@@ -145,17 +156,25 @@ func (i *BasicImporter) ensureCache() {
 	}
 }
 
-func (i *BasicImporter) forEachDatabase(location string, target string, fn func(db string, dbMeta *databaseMeta)) {
-	i.ensureCache()
+func (i *BasicImporter) getLocationsMeta(location string) (locationMeta, error) {
 	meta, ok := i.locationsMeta[location]
 	if !ok {
 		fetchedMeta, err := fetchLocationMeta(location)
 		if err != nil {
-			log.Printf("Failed fetching meta from location %s. Error: %s", location, err.Error())
-			return
+			return fetchedMeta, err
 		}
 		meta = fetchedMeta
 		i.locationsMeta[location] = meta
+	}
+	return meta, nil
+}
+
+func (i *BasicImporter) forEachDatabase(location string, target string, fn func(db string, dbMeta *databaseMeta)) {
+	i.ensureCache()
+	meta, err := i.getLocationsMeta(location)
+	if err != nil {
+		log.Printf("Failed fetching meta from location %s. Error: %s", location, err.Error())
+		return
 	}
 	for db, dbMeta := range meta.databases {
 		if _, hasDB := i.createdDatabases[db]; !hasDB {
@@ -171,18 +190,11 @@ func (i *BasicImporter) forEachDatabase(location string, target string, fn func(
 
 func (i *BasicImporter) importTokenData(location, target string, token int, db string, dbMeta *databaseMeta, resolver *cluster.Resolver) {
 	for _, rp := range dbMeta.rps {
-		log.Printf("Exporting data from database %s.%s", db, rp)
-
-		// TODO Do not rely on partition tag for the import
-		// Instead, get the partition keys for all measurements that exist on this node.
-		// Then request all tag values for these partition keys. Create all possible combinations of these tags and find those that
-		// would resolve to the token.
-		// The query below shows how we can serch for series for the partition key
 		for _, msmt := range dbMeta.measurements {
 			if importType := i.Predicate(db, msmt); importType == PartitionImport {
 				for _, series := range dbMeta.series {
 					for _, pk := range i.PartitionKeys.GetPartitionKeys() {
-						if pk.Measurement == msmt && series.Matches(token, pk, resolver) {
+						if pk.Measurement == msmt && pk.Measurement == series.Measurement && series.Matches(token, pk, resolver) {
 							importCh, _ := streamData(location, db, rp, msmt, series.Where())
 							persistStream(importCh, dbMeta, target, db, rp)
 						}
@@ -191,6 +203,50 @@ func (i *BasicImporter) importTokenData(location, target string, token int, db s
 			}
 		}
 	}
+}
+
+func (i *BasicImporter) DeleteByToken(location string, token int, resolver *cluster.Resolver) error {
+	meta, err := fetchLocationMeta(location)
+	if err != nil {
+		return fmt.Errorf("failed fetching meta from location %s: %s", location, err.Error())
+	}
+	client := http.Client{Timeout: 60 * time.Second}
+	for db, dbMeta := range meta.databases {
+		for _, rp := range dbMeta.rps {
+			for _, msmt := range dbMeta.measurements {
+				if measurementHasPartitionKey(db, msmt, i.PartitionKeys.GetPartitionKeys()) {
+					for _, series := range dbMeta.series {
+						for _, pk := range i.PartitionKeys.GetPartitionKeys() {
+							if pk.Measurement == msmt && pk.Measurement == series.Measurement && series.Matches(token, pk, resolver) {
+								q := `DROP SERIES FROM ` + msmt + ` WHERE ` + series.Where()
+								params := []string{"db=" + db, "q=" + q, "rp=" + rp}
+								values, err := url.ParseQuery(strings.Join(params, "&"))
+								if err != nil {
+									log.Println("Failed to delete data at " + location + " where " + series.Where())
+								}
+								client.Get("http://" + location + "/query?" + values.Encode())
+							}
+						}
+					}
+				} else {
+					// Test if data for this database should be deleted given the token
+					key := hash.String(cluster.CreatePartitionKeyIdentifier(db, ""))
+					resolvedToken, _ := resolver.FindTokenByKey(int(key))
+					shouldDelete := resolvedToken == token
+					if shouldDelete {
+						q := `DROP SERIES FROM ` + msmt
+						params := []string{"db=" + db, "q=" + q, "rp=" + rp}
+						values, err := url.ParseQuery(strings.Join(params, "&"))
+						if err != nil {
+							log.Println(fmt.Sprintf("Failed to delete data at %s for measurement %s", location, msmt))
+						}
+						client.Get("http://" + location + "/query?" + values.Encode())
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func persistStream(importCh chan result, dbMeta *databaseMeta, target, db, rp string) {
@@ -312,7 +368,8 @@ func parseLines(row *models.Row, tagKeys map[string]bool) []string {
 		if err != nil {
 			panic(err)
 		}
-		line += " " + strconv.Itoa(ts.Nanosecond())
+
+		line += " " + strconv.FormatInt(ts.UnixNano(), 10)
 		lines = append(lines, line)
 	}
 	return lines
@@ -329,7 +386,6 @@ func convertToString(value interface{}) string {
 }
 
 func fetchLocationMeta(location string) (locationMeta, error) {
-	log.Printf("Fetching meta data from %s", location)
 	meta := newLocationMeta()
 	databases, err := fetchDatabases(location)
 	if err != nil {
