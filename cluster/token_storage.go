@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,9 +13,10 @@ import (
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/clientv3/concurrency"
 	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
-	)
+)
 
-const maxToken = 2147483647
+// The max token is the maximum value a token could have as hashes used for partitioning are represented using uint32
+const maxToken = math.MaxUint32
 
 type TokenStorage interface {
 	Assign(token int, node string) error
@@ -50,6 +52,7 @@ func (s *EtcdTokenStorage) Lock() (*concurrency.Mutex, error) {
 	return mtx, nil
 }
 
+
 func SuggestReservations(tokenStorage TokenStorage) ([]int, error) {
 	currentTokens, err := tokenStorage.Get()
 	if err != nil {
@@ -75,6 +78,37 @@ func SuggestReservations(tokenStorage TokenStorage) ([]int, error) {
 		for name, tokens := range nodeTokens {
 			suggestions = append(suggestions, tokens[0])
 			nodeTokens[name] = tokens[1:]
+		}
+	}
+	return suggestions, nil
+}
+
+func SuggestReservationsDistributed(tokenStorage TokenStorage, resolver *Resolver) ([]int, error) {
+	currentTokens, err := tokenStorage.Get()
+	if err != nil {
+		return nil, err
+	}
+	nodeTokens := map[string][]int{}
+	for token, name := range currentTokens {
+		_, ok := nodeTokens[name]
+		if !ok {
+			nodeTokens[name] = []int{}
+		}
+		nodeTokens[name] = append(nodeTokens[name], token)
+	}
+	for _, tokens := range nodeTokens {
+		// The only reason for sorting, is to avoid randomness so that tests can make assumptions
+		// on token assignment.
+		sort.Ints(tokens)
+	}
+	// Steal tokens from other nodes
+	avgTokens := len(currentTokens) / (len(nodeTokens) + 1)
+	suggestions := []int{}
+
+	rangeSize := maxToken / avgTokens
+	for i := 0; i < avgTokens; i++ {
+		if token, ok := resolver.FindTokenByKey(i*rangeSize + 5); ok {
+			suggestions = append(suggestions, token)
 		}
 	}
 	return suggestions, nil

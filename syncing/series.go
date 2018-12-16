@@ -36,6 +36,9 @@ func (s Series) Where() string {
 }
 
 func (s Series) Matches(token int, pk cluster.PartitionKey, resolver *cluster.Resolver) bool {
+	if pk.Tags == nil {
+		return false
+	}
 	hash, err := cluster.GetHash(pk, s.filterTagsByPartitionKey(pk))
 	if err != nil{
 		return false
@@ -47,13 +50,17 @@ func (s Series) Matches(token int, pk cluster.PartitionKey, resolver *cluster.Re
 	return resolvedToken == token
 }
 
-func (s Series) filterTagsByPartitionKey(pk cluster.PartitionKey) (result map[string][]string) {
+func (s Series) filterTagsByPartitionKey(pk cluster.PartitionKey) (map[string][]string) {
+	result := map[string][]string{}
 	for _, tag := range pk.Tags {
 		if tagValue, hasTag := s.Tags[tag]; hasTag {
 			result[tag] = tagValue
 		}
 	}
-	return
+	if len(result) == 0 {
+		panic("empty filtered tags")
+	}
+	return result
 }
 
 func FetchSeries(location string, db string) (series []Series, err error) {

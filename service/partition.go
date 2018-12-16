@@ -1,11 +1,11 @@
 package service
 
 import (
-	"github.com/influxdata/influxdb/models"
+	"fmt"
 	"github.com/adamringhede/influxdb-ha/cluster"
-		"fmt"
-	"strings"
 	"github.com/adamringhede/influxdb-ha/hash"
+	"github.com/influxdata/influxdb/models"
+	"strings"
 )
 
 type PointsWriter interface {

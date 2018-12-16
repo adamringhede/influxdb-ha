@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"context"
 )
 
 type Config struct {
@@ -19,18 +20,28 @@ func Start(
 	pks cluster.PartitionKeyStorage,
 	ns cluster.NodeStorage,
 	auth AuthService,
-	config Config) {
+	config Config,
+	ctx context.Context) {
 
 	addr := config.BindAddr + ":" + strconv.FormatInt(int64(config.BindPort), 10)
 
 	ch := &ClusterHandler{pks, ns, auth}
 
-	http.Handle("/", NewQueryHandler(resolver, partitioner, ch, auth))
-	http.Handle("/write", NewWriteHandler(resolver, partitioner, auth, NewHttpPointsWriter(recovery)))
+	mux := http.NewServeMux()
+	mux.Handle("/", NewQueryHandler(resolver, partitioner, ch, auth))
+	mux.Handle("/write", NewWriteHandler(resolver, partitioner, auth, NewHttpPointsWriter(recovery)))
+
+	srv := http.Server{Addr: addr, Handler: mux}
 
 	log.Println("Listening on " + addr)
-	err := http.ListenAndServe(addr, nil)
+	err := srv.ListenAndServe()
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
+	}
+
+	done := ctx.Done()
+	select {
+		case <-done:
+			srv.Close()
 	}
 }

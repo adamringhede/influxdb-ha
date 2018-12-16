@@ -98,6 +98,9 @@ func GetHash(key PartitionKey, tags map[string][]string) (int, error) {
 				key.Measurement, strings.Join(key.Tags, ", "))
 		}
 	}
+	if len(compoundKey) == 0 {
+		panic("empty hash")
+	}
 	numericHash := int(hash.String(strings.Join(compoundKey, "")))
 	return numericHash, nil
 }

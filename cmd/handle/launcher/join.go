@@ -7,6 +7,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 func tokensToString(tokens []int, sep string) string {
@@ -24,7 +25,7 @@ func Join(localNode *cluster.Node, tokenStorage cluster.LockableTokenStorage, no
 	}
 	defer mtx.Unlock(context.Background())
 
-	isFirstNode, err := tokenStorage.InitMany(localNode.Name, 128) // this may have failed for the first node.
+	isFirstNode, err := tokenStorage.InitMany(localNode.Name, 512) // this may have failed for the first node.
 	if err != nil {
 		return err
 	}
@@ -42,7 +43,7 @@ func Join(localNode *cluster.Node, tokenStorage cluster.LockableTokenStorage, no
 
 // joinExisting takes tokens belonging to other nodes and starts importing data. This function is idempotent and can be called on multiple
 func joinExisting(localNode *cluster.Node, tokenStorage cluster.LockableTokenStorage, resolver *cluster.Resolver, importer syncing.Importer) error {
-	toSteal, err := cluster.SuggestReservations(tokenStorage)
+	toSteal, err := cluster.SuggestReservationsDistributed(tokenStorage, resolver)
 	log.Printf("Stealing %d tokens: [%s]", len(toSteal), tokensToString(toSteal, " "))
 	if err != nil {
 		return err
@@ -70,8 +71,14 @@ func joinExisting(localNode *cluster.Node, tokenStorage cluster.LockableTokenSto
 		}
 	}
 	for _, token := range reserved {
-		tokenStorage.Release(token)
-		tokenStorage.Assign(token, localNode.Name)
+		err = tokenStorage.Release(token)
+		if err != nil {
+			panic(err)
+		}
+		err = tokenStorage.Assign(token, localNode.Name)
+		if err != nil {
+			panic(err)
+		}
 
 		// Update the resolver with the most current assignments.
 		resolver.AddToken(token, localNode)
@@ -116,14 +123,17 @@ func joinExisting(localNode *cluster.Node, tokenStorage cluster.LockableTokenSto
 
 func deleteTokensData(tokenLocations map[int]*cluster.Node, importer syncing.Importer, resolver *cluster.Resolver) {
 	// This will try to delete data on the node if it is available. If it is unavailable, it should be responsible
-	// to delete data it should not have next time it starts.
-	//g := sync.WaitGroup{}
-	//g.Add(len(tokenLocations))
+	// to delete data it should not have during its recovery process.
+	g := sync.WaitGroup{}
+	g.Add(len(tokenLocations))
 	for token, node := range tokenLocations {
-		//go (func() {
-			importer.DeleteByToken(node.DataLocation, token, resolver)
-		//	g.Done()
-		//})()
+		go (func(token int, node *cluster.Node) {
+			err := importer.DeleteByToken(node.DataLocation, token, resolver)
+			if err != nil {
+				log.Printf("Failed to delete data at %s (%s) with token %d\n", node.Name, node.DataLocation, token)
+			}
+			g.Done()
+		})(token, node)
 	}
-	//g.Wait()
+	g.Wait()
 }

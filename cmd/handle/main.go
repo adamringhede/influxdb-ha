@@ -26,5 +26,6 @@ func main() {
 		BindAddr: *bindClientAddr,
 		BindPort: *bindClientPort,
 	}
-	Start(*clusterID, *nodeName, *etcdEndpoints, *dataLocation, httpConfig)
+	launcher := NewLauncher(*clusterID, *nodeName, *etcdEndpoints, *dataLocation, httpConfig)
+	launcher.Run()
 }

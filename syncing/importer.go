@@ -193,8 +193,8 @@ func (i *BasicImporter) importTokenData(location, target string, token int, db s
 		for _, msmt := range dbMeta.measurements {
 			if importType := i.Predicate(db, msmt); importType == PartitionImport {
 				for _, series := range dbMeta.series {
-					for _, pk := range i.PartitionKeys.GetPartitionKeys() {
-						if pk.Measurement == msmt && pk.Measurement == series.Measurement && series.Matches(token, pk, resolver) {
+					for _, pk := range i.PartitionKeys.GetPartitionKeys() { // fixme this may result in importing daa for the same token multiple times
+						if ((pk.Measurement == msmt && pk.Measurement == series.Measurement) || pk.Measurement == "") && series.Matches(token, pk, resolver) {
 							importCh, _ := streamData(location, db, rp, msmt, series.Where())
 							persistStream(importCh, dbMeta, target, db, rp)
 						}
@@ -206,7 +206,7 @@ func (i *BasicImporter) importTokenData(location, target string, token int, db s
 }
 
 func (i *BasicImporter) DeleteByToken(location string, token int, resolver *cluster.Resolver) error {
-	meta, err := fetchLocationMeta(location)
+	meta, err := i.getLocationsMeta(location)
 	if err != nil {
 		return fmt.Errorf("failed fetching meta from location %s: %s", location, err.Error())
 	}
@@ -217,7 +217,7 @@ func (i *BasicImporter) DeleteByToken(location string, token int, resolver *clus
 				if measurementHasPartitionKey(db, msmt, i.PartitionKeys.GetPartitionKeys()) {
 					for _, series := range dbMeta.series {
 						for _, pk := range i.PartitionKeys.GetPartitionKeys() {
-							if pk.Measurement == msmt && pk.Measurement == series.Measurement && series.Matches(token, pk, resolver) {
+							if ((pk.Measurement == msmt && pk.Measurement == series.Measurement) || pk.Measurement == "") && series.Matches(token, pk, resolver) {
 								q := `DROP SERIES FROM ` + msmt + ` WHERE ` + series.Where()
 								params := []string{"db=" + db, "q=" + q, "rp=" + rp}
 								values, err := url.ParseQuery(strings.Join(params, "&"))

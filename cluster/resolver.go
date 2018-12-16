@@ -36,6 +36,15 @@ func NewResolverWithNodes(nodes NodeCollection) *Resolver {
 	return &Resolver{NewPartitionCollection(), nodes, 2}
 }
 
+func (r *Resolver) PrintRing() {
+	it := r.collection.tree.Iterator()
+	for it.Next() {
+		token := it.Key().(int)
+		partition := it.Value().(*Partition)
+		fmt.Printf("%d -> %s \n", token, partition.Node.Name)
+	}
+}
+
 func (r *Resolver) FindTokenByKey(key int) (int, bool) {
 	partition, ok := r.collection.GetPartition(key)
 	if !ok {

@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"context"
 	"github.com/adamringhede/influxdb-ha/cluster"
 	"github.com/adamringhede/influxdb-ha/service"
 	"github.com/adamringhede/influxdb-ha/syncing"
@@ -11,88 +12,6 @@ import (
 )
 
 const etcdTimeout = 5 * time.Second
-
-// Start instantiates and links components used to run the cluster.
-func Start(clusterID string, nodeName string, etcdEndpoints string, dataLocation string, httpConfig service.Config) {
-	c, etcdErr := clientv3.New(clientv3.Config{
-		Endpoints:   strings.Split(etcdEndpoints, ","),
-		DialTimeout: etcdTimeout,
-	})
-	handleErr(etcdErr)
-
-	// Setup storage components
-	nodeStorage := cluster.NewEtcdNodeStorage(c)
-	tokenStorage := cluster.NewEtcdTokenStorageWithClient(c)
-	hintsStorage := cluster.NewEtcdHintStorage(c, nodeName)
-	settingsStorage := cluster.NewEtcdSettingsStorage(c)
-	partitionKeyStorage := cluster.NewEtcdPartitionKeyStorage(c)
-	recoveryStorage := cluster.NewLocalRecoveryStorage("./", hintsStorage)
-	authStorage := cluster.NewEtcdAuthStorage(c)
-
-	nodeStorage.ClusterID = clusterID
-	tokenStorage.ClusterID = clusterID
-	hintsStorage.ClusterID = clusterID
-	settingsStorage.ClusterID = clusterID
-	partitionKeyStorage.ClusterID = clusterID
-	authStorage.ClusterID = clusterID
-
-	nodeCollection, err := cluster.NewSyncedNodeCollection(nodeStorage)
-	handleErr(err)
-
-	defaultReplicationFactor, err := settingsStorage.GetDefaultReplicationFactor(2)
-	handleErr(err)
-
-	resolver := cluster.NewResolverWithNodes(nodeCollection)
-	_, err = cluster.NewResolverSyncer(resolver, tokenStorage, nodeCollection)
-	handleErr(err)
-	resolver.ReplicationFactor = defaultReplicationFactor
-
-	partitioner, err := cluster.NewSyncedPartitioner(partitionKeyStorage)
-	handleErr(err)
-
-	localNode, isNew := initLocalNode(dataLocation, nodeName, nodeStorage)
-
-	predicate := syncing.ClusterImportPredicate{
-		LocalNode:     *localNode,
-		PartitionKeys: partitioner,
-		Resolver:      resolver,
-	}
-
-	partitioner.AddKey(cluster.PartitionKey{})
-	importer := syncing.NewImporter(resolver, partitioner, predicate.Test)
-
-	reliableImporter, importWQ := startImporter(importer, c, resolver, *localNode, clusterID)
-	reliableImporter.AfterImport = func(token int) {
-		tokenStorage.Assign(token, localNode.Name)
-	}
-
-	authService := service.NewPersistentAuthService(authStorage)
-
-	// TODO change this to another way of handling node removal in the request handler.
-	nodeStorage.OnRemove(NewClusterNodeDeallocator(nodeCollection, tokenStorage, resolver, hintsStorage, importWQ).Remove)
-
-	go (func() {
-		for rf := range settingsStorage.WatchDefaultReplicationFactor() {
-			resolver.ReplicationFactor = rf
-		}
-	})()
-
-	go cluster.RecoverNodes(hintsStorage, recoveryStorage, nodeCollection)
-	go authService.Sync()
-
-	// Starting the service here so that the node can receive writes while joining.
-	go service.Start(resolver, partitioner, recoveryStorage, partitionKeyStorage, nodeStorage, authService, httpConfig)
-
-	if isNew {
-		err = Join(localNode, tokenStorage, nodeStorage, resolver, importer)
-		handleErr(err)
-	} else {
-		recoverFailedWrites(hintsStorage, nodeStorage, localNode)
-	}
-
-	// Sleep forever
-	select {}
-}
 
 type Launcher struct {
 	resolver    *cluster.Resolver
@@ -195,7 +114,7 @@ func NewLauncher(clusterID string, nodeName string, etcdEndpoints string, dataLo
 
 // Run is the main method to start the node
 func (l *Launcher) Run() {
-	go l.Listen()
+	go l.Listen(context.Background())
 	if l.IsNew {
 		err := l.Join()
 		handleErr(err)
@@ -205,8 +124,8 @@ func (l *Launcher) Run() {
 	l.Await()
 }
 
-func (l *Launcher) Listen() {
-	service.Start(l.resolver, l.partitioner, l.recovery, l.pks, l.ns, l.auth, l.httpConfig)
+func (l *Launcher) Listen(ctx context.Context) {
+	service.Start(l.resolver, l.partitioner, l.recovery, l.pks, l.ns, l.auth, l.httpConfig, ctx)
 }
 
 func (l *Launcher) Join() error {

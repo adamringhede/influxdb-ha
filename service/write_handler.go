@@ -124,7 +124,7 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	wg.Add(len(pointGroups))
 	var writeErr error
 	for numericHash, points := range pointGroups {
-		go (func() {
+		go (func(numericHash int, points []models.Point) {
 			locations := h.resolver.FindNodesByKey(numericHash, cluster.WRITE)
 			relayErr := h.pointsWriter.WritePoints(points, locations, writeContext)
 			if relayErr != nil {
@@ -132,7 +132,7 @@ func (h *WriteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				log.Printf("Failed to write: %s\n", relayErr.Error())
 			}
 			wg.Done()
-		})()
+		})(numericHash, points)
 	}
 	wg.Wait()
 
