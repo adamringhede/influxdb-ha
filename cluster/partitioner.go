@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/adamringhede/influxdb-ha/hash"
@@ -152,6 +153,11 @@ func (c *SyncedPartitioner) trackUpdates() {
 		select {
 		case update := <-c.storage.Watch():
 			for _, event := range update.Events {
+				event.IsModify()
+				if len(event.Kv.Value) == 0 {
+					log.Println("Warning: Parsing partition key failed. Invalid format: " + string(event.Kv.Value))
+					continue
+				}
 				var partitionKey PartitionKey
 				err := json.Unmarshal(event.Kv.Value, &partitionKey)
 				if err != nil {

@@ -10,7 +10,7 @@ import (
 
 func TestRemoveNode(t *testing.T) {
 	initWithNodes()
-	handle := utils.NewClient("192.168.99.100:8086")
+	handle := utils.NewClient("127.0.0.1:8086")
 
 	utils.WritePoints([]*influx.Point{
 		utils.NewPoint("trash", 10),
@@ -20,24 +20,23 @@ func TestRemoveNode(t *testing.T) {
 	clnt2 := utils.NewClient(utils.InfluxTwo)
 	clnt3 := utils.NewClient(utils.InfluxThree)
 
-	assertData(t, clnt1, 1)
-	assertData(t, clnt2, 0)
+	assertData(t, clnt1, 0)
+	assertData(t, clnt2, 1)
 	assertData(t, clnt3, 1)
 
-	utils.StopNode(utils.Nodes[2])
-	utils.MustQuery(handle, "REMOVE NODE " + utils.Nodes[0][0])
-	// TODO try removing it before stopping.
+	utils.MustQuery(handle, "REMOVE NODE " + utils.Nodes[1][0])
+	utils.StopNode(utils.Nodes[1])
 
 	time.Sleep(2 * time.Second)
 
 	// Tokens should now have been distributed and the data should exist on all existing nodes.
 	assertData(t, clnt1, 1)
-	assertData(t, clnt2, 1)
+	assertData(t, clnt3, 1)
 }
 
 func TestRemoveNodeWhenOthersAreDown(t *testing.T) {
 	initWithNodes()
-	handle := utils.NewClient("192.168.99.100:8086")
+	handle := utils.NewClient("127.0.0.1:8086")
 
 	utils.WritePoints([]*influx.Point{
 		utils.NewPoint("trash", 10),

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const EtcdAddress = "192.168.99.100:2379"
+const EtcdAddress = "127.0.0.1:2379"
 
 func createHttpConfig(port int) service.Config {
 	return service.Config{

@@ -1,6 +1,7 @@
 package syncing
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/adamringhede/influxdb-ha/cluster"
@@ -46,7 +47,11 @@ func (imp *ReliableImporter) Start() {
 		case task := <-tasks:
 			var checkpoint ReliableImportCheckpoint
 			var payload ReliableImportPayload
-			task.Unmarshal(&payload, &checkpoint)
+			err := task.Unmarshal(&payload, &checkpoint)
+			if err != nil {
+				fmt.Printf("Failed to unmarshal task data. Payload %s, Checkoint: %s",
+					string(task.Payload), string(task.Checkpoint))
+			}
 			imp.process(task.ID, payload, checkpoint)
 		case <-imp.stopChan:
 			return
@@ -61,7 +66,7 @@ func (imp *ReliableImporter) Stop() {
 
 func (imp *ReliableImporter) process(taskID string, payload ReliableImportPayload, checkpoint ReliableImportCheckpoint) {
 	lastIndex := checkpoint.TokenIndex
-	log.Printf("Processing task: %s", taskID)
+	log.Printf("Processing task: Import (%s)", taskID)
 
 	task := cluster.Task{}
 	task.ID = taskID

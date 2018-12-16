@@ -8,9 +8,9 @@ import (
 	influx "github.com/influxdata/influxdb/client/v2"
 )
 
-const InfluxOne = "192.168.99.100:28086"
-const InfluxTwo = "192.168.99.100:27086"
-const InfluxThree = "192.168.99.100:26086"
+const InfluxOne = "127.0.0.1:28086"
+const InfluxTwo = "127.0.0.1:27086"
+const InfluxThree = "127.0.0.1:26086"
 const TestDB = "sharded"
 
 func NewClient(location string) influx.Client {

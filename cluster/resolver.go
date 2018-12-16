@@ -142,7 +142,7 @@ func (r *Resolver) RemoveAllTokens() {
 }
 
 func (r *Resolver) AddToken(token int, node *Node) {
-	p := &Partition{token, node}
+	p := &Partition{token, node} // if node is nil, this can cause issues later on when fetching data.
 	r.collection.Put(p)
 	if node != nil {
 		if _, exists := r.nodes.Get(node.Name); !exists {
@@ -197,6 +197,7 @@ func (r *ResolverSyncer) trackUpdates() {
 	}
 }
 
+// updateFromStorage updates the assignment of tokens to nodes.
 func (c *ResolverSyncer) updateFromStorage() error {
 	tokens, err := c.tokens.Get()
 	if err != nil {
@@ -206,8 +207,10 @@ func (c *ResolverSyncer) updateFromStorage() error {
 		if node, ok := c.nodes.Get(nodeName); ok {
 			c.resolver.AddToken(token, &node)
 		} else {
-			fmt.Printf("Warning: Could not find a node with name '%s'. This token should be reassigned to another node before removing the node.", nodeName)
-			c.resolver.AddToken(token, nil)
+			// TODO Fix this message so that we don't log it for every token as there may be thousands of them .
+			//fmt.Printf("Warning: Could not find a node with name '%s'. This token should be reassigned to another node before removing the node.", nodeName)
+			// setting the node to nil is not a good idea. this can cause other things to fail later
+			//c.resolver.AddToken(token, nil)
 		}
 	}
 	return nil
