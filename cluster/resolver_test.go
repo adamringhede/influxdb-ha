@@ -22,16 +22,17 @@ func TestResolver_FindByKey(t *testing.T) {
 	assert.Len(t, resolver.FindByKey(2, READ), 0)
 
 	resolver.AddToken(1, &Node{[]int{1}, NodeStatusUp, ":8086", "local"})
-	resolver.AddToken(3, &Node{})
+	resolver.AddToken(3, &Node{[]int{3}, NodeStatusJoining, ":9096", "local2"})
 
-	locations := resolver.FindByKey(2, READ)
-	assert.Len(t, locations, 2)
+	locations := resolver.FindByKey(1, READ)
+	assert.Len(t, locations, 1)
 	assert.Contains(t, locations, ":8086")
 
 	resolver.RemoveToken(1)
 
-	locations2 := resolver.FindByKey(2, READ)
-	assert.Contains(t, locations2, "")
+	locations2 := resolver.FindByKey(2, WRITE)
+	assert.Len(t, locations2, 1)
+	assert.Contains(t, locations2, ":9096")
 }
 
 func TestResolver_ReverseSecondaryLookup(t *testing.T) {
