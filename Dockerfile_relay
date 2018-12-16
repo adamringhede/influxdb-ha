@@ -1,8 +1,0 @@
-FROM golang:1.9
-
-RUN go get -u github.com/influxdata/influxdb-relay
-ADD relay.toml ./relay.toml
-
-EXPOSE 9096
-
-CMD $GOPATH/bin/influxdb-relay -config relay.toml
