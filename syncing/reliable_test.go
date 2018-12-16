@@ -40,9 +40,7 @@ func setUpReliableTest() (*clientv3.Client, *cluster.Resolver) {
 	return etcdClient, resolver
 }
 
-/*
-	Test that
-*/
+
 func TestReliableImporter(t *testing.T) {
 	etcdClient, resolver := setUpReliableTest()
 
