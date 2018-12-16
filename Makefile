@@ -6,6 +6,9 @@ build:
 save:
 	godep save ./...
 
+test:
+	go test ./{cluster,service,syncing}/...
+
 push-dockerhub:
 	docker build -t adamringhede/influxdb-cluster -f Dockerfile_handle . && \
 	docker push adamringhede/influxdb-cluster
