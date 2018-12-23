@@ -61,7 +61,7 @@ func joinExisting(localNode *cluster.Node, tokenStorage cluster.LockableTokenSto
 	}
 
 	log.Println("Starting import of primary data")
-	importer.Import(reserved, resolver, localNode.DataLocation)
+	importer.Import(reserved, localNode.DataLocation)
 
 	oldDataHolders := map[int][]*cluster.Node{}
 	for _, token := range reserved {
@@ -93,11 +93,11 @@ func joinExisting(localNode *cluster.Node, tokenStorage cluster.LockableTokenSto
 	}
 	if len(secondaryTokens) > 0 {
 		log.Println("Starting import of replicated data")
-		importer.Import(secondaryTokens, resolver, localNode.DataLocation)
+		importer.Import(secondaryTokens, localNode.DataLocation)
 	}
 
 	// Importing non partitioned after tokens been assigned to get primary and secondary data.
-	importer.ImportNonPartitioned(resolver, localNode.DataLocation)
+	importer.ImportNonPartitioned(localNode.DataLocation)
 
 	// The filtered list of primaries which not longer should hold data for assigned tokens.
 	deleteMap := map[int]*cluster.Node{}
@@ -116,19 +116,19 @@ func joinExisting(localNode *cluster.Node, tokenStorage cluster.LockableTokenSto
 			}
 		}
 	}
-	deleteTokensData(deleteMap, importer, resolver)
+	deleteTokensData(deleteMap, importer)
 	return nil
 }
 
 
-func deleteTokensData(tokenLocations map[int]*cluster.Node, importer syncing.Importer, resolver *cluster.Resolver) {
+func deleteTokensData(tokenLocations map[int]*cluster.Node, importer syncing.Importer) {
 	// This will try to delete data on the node if it is available. If it is unavailable, it should be responsible
 	// to delete data it should not have during its recovery process.
 	g := sync.WaitGroup{}
 	g.Add(len(tokenLocations))
 	for token, node := range tokenLocations {
 		go (func(token int, node *cluster.Node) {
-			err := importer.DeleteByToken(node.DataLocation, token, resolver)
+			err := importer.DeleteByToken(node.DataLocation, token)
 			if err != nil {
 				log.Printf("Failed to delete data at %s (%s) with token %d\n", node.Name, node.DataLocation, token)
 			}

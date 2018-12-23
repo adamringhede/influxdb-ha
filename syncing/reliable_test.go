@@ -9,15 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type PausingWorkQueue struct {
-	cluster.MockedWorkQueue
-}
-
-func (wq *PausingWorkQueue) CheckIn(task cluster.Task) {
-	wq.MockedWorkQueue.CheckIn(task)
-	time.Sleep(10 * time.Millisecond)
-}
-
 func setUpReliableTest() (*clientv3.Client, *cluster.Resolver) {
 	initiate()
 	resolver := cluster.NewResolver()
@@ -29,6 +20,7 @@ func setUpReliableTest() (*clientv3.Client, *cluster.Resolver) {
 		"treasures,type=gold," + cluster.PartitionTagName + "=0 value=5",
 		"treasures,type=silver," + cluster.PartitionTagName + "=100 value=4",
 	})
+	time.Sleep(500 * time.Millisecond)
 
 	etcdClient, err := clientv3.New(clientv3.Config{
 		Endpoints:   []string{"http://" + etcdLoc},

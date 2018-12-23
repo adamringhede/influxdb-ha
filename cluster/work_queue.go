@@ -65,7 +65,6 @@ type WorkQueue interface {
 }
 
 type MockedWorkQueue struct {
-	busy  bool
 	tasks chan TaskData
 }
 

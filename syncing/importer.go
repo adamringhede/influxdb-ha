@@ -28,9 +28,9 @@ type ImportBatch struct {
 }
 
 type Importer interface {
-	Import(tokens []int, resolver *cluster.Resolver, target string)
-	ImportNonPartitioned(resolver *cluster.Resolver, target string)
-	DeleteByToken(location string, token int, resolver *cluster.Resolver) error
+	Import(tokens []int, target string)
+	ImportNonPartitioned(target string)
+	DeleteByToken(location string, token int) error
 }
 
 type ErrorNoNodeFound struct{ Token int }
@@ -99,7 +99,7 @@ func measurementHasPartitionKey(db, msmt string, pks []cluster.PartitionKey) boo
 	return false
 }
 
-type BasicImporter struct {
+type ClusterImporter struct {
 	loader        Loader
 	Predicate     ImportDecisionTester
 	PartitionKeys cluster.PartitionKeyCollection
@@ -110,12 +110,12 @@ type BasicImporter struct {
 	locationsMeta    map[string]locationMeta
 }
 
-func NewImporter(resolver *cluster.Resolver, partitionKeys cluster.PartitionKeyCollection, predicate ImportDecisionTester) *BasicImporter {
-	return &BasicImporter{Predicate: predicate, Resolver: resolver, PartitionKeys: partitionKeys}
+func NewImporter(resolver *cluster.Resolver, partitionKeys cluster.PartitionKeyCollection, predicate ImportDecisionTester) *ClusterImporter {
+	return &ClusterImporter{Predicate: predicate, Resolver: resolver, PartitionKeys: partitionKeys}
 }
 
-func (i *BasicImporter) ImportNonPartitioned(resolver *cluster.Resolver, target string) {
-	for _, location := range resolver.FindAll() { //except self == target
+func (i *ClusterImporter) ImportNonPartitioned(target string) {
+	for _, location := range i.Resolver.FindAll() { //except self == target
 		if location != target {
 			i.forEachDatabase(location, target, func(db string, dbMeta *databaseMeta) {
 				for _, msmt := range dbMeta.measurements {
@@ -134,12 +134,12 @@ func (i *BasicImporter) ImportNonPartitioned(resolver *cluster.Resolver, target 
 
 // Import data given a set of tokens. The tokens should include those stolen from
 // other nodes as well as token for which this node is holding replicated data
-func (i *BasicImporter) Import(tokens []int, resolver *cluster.Resolver, target string) {
+func (i *ClusterImporter) Import(tokens []int, target string) {
 	for _, token := range tokens {
-		nodes := resolver.FindByKey(token, cluster.READ)
+		nodes := i.Resolver.FindByKey(token, cluster.READ)
 		for _, location := range nodes {
 			i.forEachDatabase(location, target, func(db string, dbMeta *databaseMeta) {
-				i.importTokenData(location, target, token, db, dbMeta, resolver)
+				i.importTokenData(location, target, token, db, dbMeta, i.Resolver)
 			})
 		}
 	}
@@ -147,7 +147,7 @@ func (i *BasicImporter) Import(tokens []int, resolver *cluster.Resolver, target 
 	// If no location is available at this time, then we have to try again later.
 }
 
-func (i *BasicImporter) ensureCache() {
+func (i *ClusterImporter) ensureCache() {
 	if i.createdDatabases == nil {
 		i.createdDatabases = map[string]bool{}
 	}
@@ -156,7 +156,7 @@ func (i *BasicImporter) ensureCache() {
 	}
 }
 
-func (i *BasicImporter) getLocationsMeta(location string) (locationMeta, error) {
+func (i *ClusterImporter) getLocationsMeta(location string) (locationMeta, error) {
 	meta, ok := i.locationsMeta[location]
 	if !ok {
 		fetchedMeta, err := fetchLocationMeta(location)
@@ -169,7 +169,7 @@ func (i *BasicImporter) getLocationsMeta(location string) (locationMeta, error) 
 	return meta, nil
 }
 
-func (i *BasicImporter) forEachDatabase(location string, target string, fn func(db string, dbMeta *databaseMeta)) {
+func (i *ClusterImporter) forEachDatabase(location string, target string, fn func(db string, dbMeta *databaseMeta)) {
 	i.ensureCache()
 	meta, err := i.getLocationsMeta(location)
 	if err != nil {
@@ -188,7 +188,7 @@ func (i *BasicImporter) forEachDatabase(location string, target string, fn func(
 	}
 }
 
-func (i *BasicImporter) importTokenData(location, target string, token int, db string, dbMeta *databaseMeta, resolver *cluster.Resolver) {
+func (i *ClusterImporter) importTokenData(location, target string, token int, db string, dbMeta *databaseMeta, resolver *cluster.Resolver) {
 	for _, rp := range dbMeta.rps {
 		for _, msmt := range dbMeta.measurements {
 			if importType := i.Predicate(db, msmt); importType == PartitionImport {
@@ -205,7 +205,7 @@ func (i *BasicImporter) importTokenData(location, target string, token int, db s
 	}
 }
 
-func (i *BasicImporter) DeleteByToken(location string, token int, resolver *cluster.Resolver) error {
+func (i *ClusterImporter) DeleteByToken(location string, token int) error {
 	meta, err := i.getLocationsMeta(location)
 	if err != nil {
 		return fmt.Errorf("failed fetching meta from location %s: %s", location, err.Error())
@@ -217,7 +217,7 @@ func (i *BasicImporter) DeleteByToken(location string, token int, resolver *clus
 				if measurementHasPartitionKey(db, msmt, i.PartitionKeys.GetPartitionKeys()) {
 					for _, series := range dbMeta.series {
 						for _, pk := range i.PartitionKeys.GetPartitionKeys() {
-							if ((pk.Measurement == msmt && pk.Measurement == series.Measurement) || pk.Measurement == "") && series.Matches(token, pk, resolver) {
+							if ((pk.Measurement == msmt && pk.Measurement == series.Measurement) || pk.Measurement == "") && series.Matches(token, pk, i.Resolver) {
 								q := `DROP SERIES FROM ` + msmt + ` WHERE ` + series.Where()
 								params := []string{"db=" + db, "q=" + q, "rp=" + rp}
 								values, err := url.ParseQuery(strings.Join(params, "&"))
@@ -231,7 +231,7 @@ func (i *BasicImporter) DeleteByToken(location string, token int, resolver *clus
 				} else {
 					// Test if data for this database should be deleted given the token
 					key := hash.String(cluster.CreatePartitionKeyIdentifier(db, ""))
-					resolvedToken, _ := resolver.FindTokenByKey(int(key))
+					resolvedToken, _ := i.Resolver.FindTokenByKey(int(key))
 					shouldDelete := resolvedToken == token
 					if shouldDelete {
 						q := `DROP SERIES FROM ` + msmt

@@ -69,18 +69,6 @@ func groupResultsByTags(allResults [][]Result) map[string][]Result {
 	return groupedResults
 }
 
-func timeGreaterThan(a, b string) bool {
-	ats, err := time.Parse(time.RFC3339Nano, a)
-	if err != nil {
-		log.Panic(err)
-	}
-	bts, err := time.Parse(time.RFC3339Nano, b)
-	if err != nil {
-		log.Panic(err)
-	}
-	return ats.Nanosecond() > bts.Nanosecond()
-}
-
 // mergeSortResults assuems that there is only one series
 func mergeSortResults(groupedResults map[string][]Result, less compareLess) []Result {
 	mergedResults := []Result{}
@@ -311,24 +299,6 @@ hashLoop:
 		}
 	}
 	return allResults, nil, response
-}
-
-type valueConfig struct {
-	aggregation string
-}
-
-type valueResult struct {
-}
-
-type Strategy struct {
-	database    string
-	measurement string
-	hashedKey   int
-	values      map[string]valueConfig
-}
-
-// Executor executes a strategy in parallel and then maybe merges the results or just return the series for each key.
-type Executor struct {
 }
 
 type tagFinder struct {

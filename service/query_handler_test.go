@@ -81,7 +81,7 @@ func setup() {
 	mustQuery(clnt1, "CREATE DATABASE "+testDB)
 	mustQuery(clnt2, "DROP DATABASE "+testDB)
 	mustQuery(clnt2, "CREATE DATABASE "+testDB)
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(time.Second)
 
 	// Simulating correctly partitioned data without replication
 	// trash = 1583631877
@@ -97,7 +97,7 @@ func setup() {
 		newPoint("silver", 50),
 	}, clnt2)
 
-	time.Sleep(time.Millisecond * 50)
+	time.Sleep(time.Millisecond * 500)
 }
 
 func setUpSelectTest() *QueryHandler {

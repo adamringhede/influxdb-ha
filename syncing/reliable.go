@@ -73,7 +73,7 @@ func (imp *ReliableImporter) process(taskID string, payload ReliableImportPayloa
 	task.Payload = payload
 
 	if payload.NonPartitioned {
-		imp.importer.ImportNonPartitioned(imp.resolver, imp.target)
+		imp.importer.ImportNonPartitioned(imp.target)
 
 		task.Checkpoint = checkpoint
 		imp.wq.CheckIn(task)
@@ -89,7 +89,7 @@ func (imp *ReliableImporter) process(taskID string, payload ReliableImportPayloa
 
 		// maybe instead of just using tokens, the importer also can take an option of a batch size which could be in terms of series or points imported.
 		// also, it could be a good idea to distribute databases (not measurements as some queries need them to be one the same node)
-		imp.importer.Import([]int{token}, imp.resolver, imp.target)
+		imp.importer.Import([]int{token}, imp.target)
 		checkpoint.TokenIndex = i + 1
 		task.Checkpoint = checkpoint
 
