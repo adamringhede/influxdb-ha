@@ -36,6 +36,10 @@ func NewLauncher(clusterID string, nodeName string, etcdEndpoints string, dataLo
 	})
 	handleErr(etcdErr)
 
+	if err := isHttpAvailable(dataLocation); err != nil {
+		log.Panicf("Error: Could not reach InfluxDB at %s because of %s", dataLocation, err)
+	}
+
 	// Setup storage components
 	nodeStorage := cluster.NewEtcdNodeStorage(c)
 	tokenStorage := cluster.NewEtcdTokenStorageWithClient(c)
