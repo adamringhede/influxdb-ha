@@ -11,6 +11,7 @@ import (
 func TestQueryHandler_Coordinator_DistributeQueryAndAggregateResults(t *testing.T) {
 	handler := setUpSelectTest()
 	res := mustQueryCluster(t, handler, `select mean(value) from treasures WHERE time <= now() AND (type = 'gold' OR type = 'trash') GROUP BY time(1d) LIMIT 1`)
+	assert.IsType(t, float64(1), res[0].Series[0].Values[0][0])
 	assert.Equal(t, 50., res[0].Series[0].Values[0][1])
 }
 
@@ -96,11 +97,6 @@ func setup() {
 		newPoint("silver", 50),
 	}, clnt2)
 
-	// TODO We don't need to start the server. We only need to test the handlers.
-	/*go Start(resolver, partitioner, cluster.NewLocalRecoveryStorage("./", nil), pks, nil, nil, Config{
-		"0.0.0.0",
-		8099,
-	})*/
 	time.Sleep(time.Millisecond * 50)
 }
 

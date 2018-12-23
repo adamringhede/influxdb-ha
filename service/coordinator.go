@@ -258,7 +258,6 @@ func (c *Coordinator) Handle(stmt *influxql.SelectStatement, r *http.Request, db
 		locations := c.resolver.FindByKey(int(key), cluster.READ)
 		return requestMultipleLocations(stmt.String(), locations, client, r)
 	}
-	return []Result{}, nil, nil
 }
 
 func requestMultipleLocations(stmt string, locations []string, client *http.Client, r *http.Request) ([]Result, error, *http.Response) {
@@ -424,7 +423,7 @@ type ResultSource struct {
 }
 
 type resultGroup struct {
-	time   string
+	time   interface{}
 	values []interface{}
 }
 
@@ -435,17 +434,12 @@ func NewResultSource(results []Result) *ResultSource {
 	}
 
 	// Group values by time and ensure order.
-	a := map[string]int{}
+	a := map[interface{}]int{}
 	ai := 0
 	for _, res := range results {
 		for _, series := range res.Series {
 			for _, v := range series.Values {
-				var k string
-				if _, isString := v[0].(string); isString {
-					k = string(v[0].(string))
-				} else {
-					k = fmt.Sprintf("%f", v[0].(float64))
-				}
+				var k = v[0]
 				if _, ok := a[k]; !ok {
 					source.data = append(source.data, resultGroup{k, []interface{}{}})
 					a[k] = ai
@@ -490,7 +484,7 @@ func (s *ResultSource) Next(fieldKey string) []float64 {
 	return res
 }
 
-func (s *ResultSource) Time() string {
+func (s *ResultSource) Time() interface{} {
 	if s.Done() {
 		return ""
 	}
