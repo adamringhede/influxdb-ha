@@ -81,7 +81,7 @@ func setup() {
 	mustQuery(clnt1, "CREATE DATABASE "+testDB)
 	mustQuery(clnt2, "DROP DATABASE "+testDB)
 	mustQuery(clnt2, "CREATE DATABASE "+testDB)
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	// Simulating correctly partitioned data without replication
 	// trash = 1583631877
