@@ -35,7 +35,7 @@ func initiate() {
 	multiple(influxTwo, []string{
 		"DROP DATABASE " + testDB,
 	})
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 }
 
 func Test_fetchLocationMeta(t *testing.T) {
