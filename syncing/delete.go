@@ -18,7 +18,7 @@ func Delete(token int, location string) {
 		return
 	}
 	for db, dbMeta := range meta.databases {
-		for _, rp := range dbMeta.rps {
+		for _, rp := range dbMeta.Rps {
 			q := `DROP SERIES WHERE ` + cluster.PartitionTagName + `='` + strconv.Itoa(token) + `'`
 			log.Printf("%s: %s", location, q)
 			params := []string{"db=" + db, "q=" + q, "rp=" + rp}

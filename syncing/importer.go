@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	influx "github.com/influxdata/influxdb/client/v2"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -28,9 +29,9 @@ type ImportBatch struct {
 }
 
 type Importer interface {
-	Import(tokens []int, target string)
-	ImportNonPartitioned(target string)
-	DeleteByToken(location string, token int) error
+	ImportPartitioned(tokens []int, target InfluxClient)
+	ImportNonPartitioned(target InfluxClient)
+	DeleteByToken(location InfluxClient, token int) error
 }
 
 type ErrorNoNodeFound struct{ Token int }
@@ -72,7 +73,7 @@ type ClusterImportPredicate struct {
 // Test returns true if data should be imported for a given database and measurement.
 // - test that the measurement has a partitionKey (otherwise it should not be imported by default)
 // - test that the database hash resolves to the node given the configured replication factor
-// The reason for hashing on database and not measurement is so that queries including multiple measurements
+// The reason for hashing on database and not measurement is so that queries including multiple Measurements
 // don't need to be distributed. In the future we may add support for this as it is probably a useful use case.
 func (p *ClusterImportPredicate) Test(db, msmt string) ImportDecision {
 	for _, pk := range p.PartitionKeys.GetPartitionKeys() {
@@ -99,64 +100,57 @@ func measurementHasPartitionKey(db, msmt string, pks []cluster.PartitionKey) boo
 	return false
 }
 
-type ClusterImporter struct {
-	loader        Loader
-	Predicate     ImportDecisionTester
-	PartitionKeys cluster.PartitionKeyCollection
-	Resolver      *cluster.Resolver
-
-	// cache
-	createdDatabases map[string]bool
-	locationsMeta    map[string]locationMeta
+type InfluxImporter struct {
+	MetaImporter
 }
 
-func NewImporter(resolver *cluster.Resolver, partitionKeys cluster.PartitionKeyCollection, predicate ImportDecisionTester) *ClusterImporter {
-	return &ClusterImporter{Predicate: predicate, Resolver: resolver, PartitionKeys: partitionKeys}
+func NewInfluxImporter() *InfluxImporter {
+	return &InfluxImporter{}
 }
 
-func (i *ClusterImporter) ImportNonPartitioned(target string) {
-	for _, location := range i.Resolver.FindAll() { //except self == target
-		if location != target {
-			i.forEachDatabase(location, target, func(db string, dbMeta *databaseMeta) {
-				for _, msmt := range dbMeta.measurements {
-					// TODO only import if there is no partition key
-					if importType := i.Predicate(db, msmt); importType == FullImport {
-						for _, rp := range dbMeta.rps {
-							importCh, _ := streamData(location, db, rp, msmt, "")
-							persistStream(importCh, dbMeta, target, db, rp)
-						}
-					}
+type Checkpoint struct {
+	db, rp, msmt string
+	timestamp int
+}
+
+func NewCheckpoint(db string, rp string, msmt string, timestamp int) *Checkpoint {
+	return &Checkpoint{db: db, rp: rp, msmt: msmt, timestamp: timestamp}
+}
+
+func (i *InfluxImporter) ImportAll(host, destination InfluxClient, checkpointFn func (checkpoint Checkpoint)) {
+	// This does not work when using bookmarks or to filter some of them.
+	// This needs to be a completely different component. In some way we need to reuse some functions
+	// TODO Mirroring requires authentication as well on both reading and writing so many of these methods need to be rewritten.
+	i.forEachDatabase(host, target, func(db string, dbMeta *DatabaseMeta) {
+		for _, msmt := range dbMeta.Measurements {
+			for _, rp := range dbMeta.Rps {
+				importCh, _ := streamData(location, db, rp, msmt, "")
+				for res := range importCh {
+					persistResult(, dbMeta, target, db, rp)
+					checkpointFn(NewCheckpoint(db, rp, msmt, )) // need to get the timestamp from the latest checkpoint
 				}
-			})
+
+			}
 		}
-	}
+	})
 }
 
-// Import data given a set of tokens. The tokens should include those stolen from
-// other nodes as well as token for which this node is holding replicated data
-func (i *ClusterImporter) Import(tokens []int, target string) {
-	for _, token := range tokens {
-		nodes := i.Resolver.FindByKey(token, cluster.READ)
-		for _, location := range nodes {
-			i.forEachDatabase(location, target, func(db string, dbMeta *databaseMeta) {
-				i.importTokenData(location, target, token, db, dbMeta, i.Resolver)
-			})
-		}
-	}
-	// TODO check that import worked
-	// If no location is available at this time, then we have to try again later.
+
+type MetaImporter struct {
+	createdDatabases map[string]bool
+	locationsMeta    map[InfluxClient]locationMeta
 }
 
-func (i *ClusterImporter) ensureCache() {
+func (i *MetaImporter) ensureCache() {
 	if i.createdDatabases == nil {
 		i.createdDatabases = map[string]bool{}
 	}
 	if i.locationsMeta == nil {
-		i.locationsMeta = map[string]locationMeta{}
+		i.locationsMeta = map[InfluxClient]locationMeta{}
 	}
 }
 
-func (i *ClusterImporter) getLocationsMeta(location string) (locationMeta, error) {
+func (i *MetaImporter) getLocationsMeta(location InfluxClient) (locationMeta, error) {
 	meta, ok := i.locationsMeta[location]
 	if !ok {
 		fetchedMeta, err := fetchLocationMeta(location)
@@ -169,7 +163,7 @@ func (i *ClusterImporter) getLocationsMeta(location string) (locationMeta, error
 	return meta, nil
 }
 
-func (i *ClusterImporter) forEachDatabase(location string, target string, fn func(db string, dbMeta *databaseMeta)) {
+func (i *MetaImporter) forEachDatabase(location, target InfluxClient, fn func(db string, dbMeta *DatabaseMeta)) {
 	i.ensureCache()
 	meta, err := i.getLocationsMeta(location)
 	if err != nil {
@@ -179,8 +173,8 @@ func (i *ClusterImporter) forEachDatabase(location string, target string, fn fun
 	for db, dbMeta := range meta.databases {
 		if _, hasDB := i.createdDatabases[db]; !hasDB {
 			createDatabase(db, target)
-			createRPs(db, dbMeta.rpsSettings, target)
-			createCQs(db, dbMeta.cqs, target)
+			createRPs(db, dbMeta.RpsSettings, target)
+			createCQs(db, dbMeta.Cqs, target)
 
 			i.createdDatabases[db] = true
 		}
@@ -188,15 +182,65 @@ func (i *ClusterImporter) forEachDatabase(location string, target string, fn fun
 	}
 }
 
-func (i *ClusterImporter) importTokenData(location, target string, token int, db string, dbMeta *databaseMeta, resolver *cluster.Resolver) {
-	for _, rp := range dbMeta.rps {
-		for _, msmt := range dbMeta.measurements {
+type ClusterImporter struct {
+	MetaImporter
+	loader        Loader
+	Predicate     ImportDecisionTester
+	PartitionKeys cluster.PartitionKeyCollection
+	Resolver      *cluster.Resolver
+}
+
+func NewImporter(resolver *cluster.Resolver, partitionKeys cluster.PartitionKeyCollection, predicate ImportDecisionTester) *ClusterImporter {
+	return &ClusterImporter{Predicate: predicate, Resolver: resolver, PartitionKeys: partitionKeys}
+}
+
+func (i *ClusterImporter) ImportNonPartitioned(target InfluxClient) {
+	for _, address := range i.Resolver.FindAll() {
+		location, _ := NewInfluxClientWithUsingHTTP(address, "", "")
+		if location.String() != target.String() {
+			i.forEachDatabase(location, target, func(db string, dbMeta *DatabaseMeta) {
+				for _, msmt := range dbMeta.Measurements {
+					// TODO only import if there is no partition key
+					if importType := i.Predicate(db, msmt); importType == FullImport {
+						for _, rp := range dbMeta.Rps {
+							importCh, _ := streamData(location, db, rp, msmt, "")
+							for res := range importCh {
+								persistResult(res, dbMeta, target, db, rp)
+							}
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+// ImportPartitioned data given a set of tokens. The tokens should include those stolen from
+// other nodes as well as token for which this node is holding replicated data
+func (i *ClusterImporter) ImportPartitioned(tokens []int, target string) {
+	for _, token := range tokens {
+		nodes := i.Resolver.FindByKey(token, cluster.READ)
+		for _, location := range nodes {
+			i.forEachDatabase(location, target, func(db string, dbMeta *DatabaseMeta) {
+				i.importTokenData(location, target, token, db, dbMeta, i.Resolver)
+			})
+		}
+	}
+	// TODO check that import worked
+	// If no location is available at this time, then we have to try again later.
+}
+
+func (i *ClusterImporter) importTokenData(location, target string, token int, db string, dbMeta *DatabaseMeta, resolver *cluster.Resolver) {
+	for _, rp := range dbMeta.Rps {
+		for _, msmt := range dbMeta.Measurements {
 			if importType := i.Predicate(db, msmt); importType == PartitionImport {
 				for _, series := range dbMeta.series {
 					for _, pk := range i.PartitionKeys.GetPartitionKeys() { // fixme this may result in importing daa for the same token multiple times
 						if ((pk.Measurement == msmt && pk.Measurement == series.Measurement) || pk.Measurement == "") && series.Matches(token, pk, resolver) {
 							importCh, _ := streamData(location, db, rp, msmt, series.Where())
-							persistStream(importCh, dbMeta, target, db, rp)
+							for res := range importCh {
+								persistResult(res, dbMeta, target, db, rp)
+							}
 						}
 					}
 				}
@@ -205,26 +249,22 @@ func (i *ClusterImporter) importTokenData(location, target string, token int, db
 	}
 }
 
-func (i *ClusterImporter) DeleteByToken(location string, token int) error {
+func (i *ClusterImporter) DeleteByToken(location InfluxClient, token int) error {
 	meta, err := i.getLocationsMeta(location)
 	if err != nil {
 		return fmt.Errorf("failed fetching meta from location %s: %s", location, err.Error())
 	}
-	client := http.Client{Timeout: 60 * time.Second}
 	for db, dbMeta := range meta.databases {
-		for _, rp := range dbMeta.rps {
-			for _, msmt := range dbMeta.measurements {
+		for _, rp := range dbMeta.Rps {
+			for _, msmt := range dbMeta.Measurements {
 				if measurementHasPartitionKey(db, msmt, i.PartitionKeys.GetPartitionKeys()) {
 					for _, series := range dbMeta.series {
 						for _, pk := range i.PartitionKeys.GetPartitionKeys() {
 							if ((pk.Measurement == msmt && pk.Measurement == series.Measurement) || pk.Measurement == "") && series.Matches(token, pk, i.Resolver) {
-								q := `DROP SERIES FROM ` + msmt + ` WHERE ` + series.Where()
-								params := []string{"db=" + db, "q=" + q, "rp=" + rp}
-								values, err := url.ParseQuery(strings.Join(params, "&"))
+								err := location.DropSeriesFromWhere(db, msmt, series.Where())
 								if err != nil {
-									log.Println("Failed to delete data at " + location + " where " + series.Where())
+									log.Println("Failed to delete data at " + location.String() + " where " + series.Where())
 								}
-								client.Get("http://" + location + "/query?" + values.Encode())
 							}
 						}
 					}
@@ -234,13 +274,10 @@ func (i *ClusterImporter) DeleteByToken(location string, token int) error {
 					resolvedToken, _ := i.Resolver.FindTokenByKey(int(key))
 					shouldDelete := resolvedToken == token
 					if shouldDelete {
-						q := `DROP SERIES FROM ` + msmt
-						params := []string{"db=" + db, "q=" + q, "rp=" + rp}
-						values, err := url.ParseQuery(strings.Join(params, "&"))
+						err := location.DropSeriesFrom(db, msmt))
 						if err != nil {
-							log.Println(fmt.Sprintf("Failed to delete data at %s for measurement %s", location, msmt))
+							log.Println(fmt.Sprintf("Failed to delete data at %s for measurement %s", location.String(), msmt))
 						}
-						client.Get("http://" + location + "/query?" + values.Encode())
 					}
 				}
 			}
@@ -249,19 +286,20 @@ func (i *ClusterImporter) DeleteByToken(location string, token int) error {
 	return nil
 }
 
-func persistStream(importCh chan result, dbMeta *databaseMeta, target, db, rp string) {
-	for res := range importCh {
-		var lines []string
-		for _, row := range res.Series {
-			lines = append(lines, parseLines(row, dbMeta.tagKeys)...)
-		}
-		// TODO handle authentication
-		_, err := postLines(target, db, rp, lines)
-		if err != nil {
-			// TODO handle any type of failure to write locally.
-			// TODO find a better way to structure this to handle errors instead of panic.
-			log.Panicf("Failed to post data to target node %s.", target)
-		}
+func persistResult(res influx.Result, dbMeta *DatabaseMeta, target InfluxClient, db, rp string) {
+	batch, _ := influx.NewBatchPoints(influx.BatchPointsConfig{
+		Precision: "ns",
+		Database: db,
+		RetentionPolicy: rp,
+		WriteConsistency: "1",
+	})
+	for _, row := range res.Series {
+		// TODO change method to take points instead as it is a better format than generic influx.Result
+		batch.AddPoints(convertToPoints(row, dbMeta.TagKeys))
+	}
+	err := target.Write(batch)
+	if err != nil {
+		log.Panicf("Failed to post data to target node %s.", target)
 	}
 }
 
@@ -345,6 +383,7 @@ func parseLines(row *models.Row, tagKeys map[string]bool) []string {
 		i := 1
 		// Tags
 		for ; i < len(row.Columns)-1; i += 1 {
+			// Avoid saving values as tags
 			if _, ok := tagKeys[row.Name+"."+row.Columns[i]]; ok {
 				if values[i] != nil {
 					line += "," + row.Columns[i] + "=" + values[i].(string)
@@ -375,6 +414,45 @@ func parseLines(row *models.Row, tagKeys map[string]bool) []string {
 	return lines
 }
 
+
+func convertToPoints(row models.Row, tagKeys map[string]bool) []*influx.Point {
+	points := []*influx.Point{}
+	for _, values := range row.Values {
+		tags := map[string]string{}
+		i := 1
+		// Tags
+		for ; i < len(row.Columns)-1; i += 1 {
+			// Avoid saving values as tags
+			if _, ok := tagKeys[row.Name+"."+row.Columns[i]]; ok {
+				if values[i] != nil {
+					tags[row.Columns[i]] = values[i].(string)
+				}
+			} else {
+				break
+			}
+		}
+		fields := map[string]interface{};
+		// Values
+		for ; i < len(row.Columns); i += 1 {
+			if values[i] != nil {
+				fields[row.Columns[i]] = values[i]
+			}
+		}
+		// Time
+		timeStr := values[0].(string)
+		ts, err := time.Parse(time.RFC3339Nano, timeStr)
+		if err != nil {
+			panic(err)
+		}
+		point, err := influx.NewPoint(row.Name, tags, fields, ts)
+		if err != nil {
+			panic(err)
+		}
+		points = append(points, point)
+	}
+	return points
+}
+
 func convertToString(value interface{}) string {
 	switch value.(type) {
 	case float64:
@@ -385,7 +463,7 @@ func convertToString(value interface{}) string {
 	return ""
 }
 
-func fetchLocationMeta(location string) (locationMeta, error) {
+func fetchLocationMeta(location InfluxClient) (locationMeta, error) {
 	meta := newLocationMeta()
 	databases, err := fetchDatabases(location)
 	if err != nil {
@@ -402,31 +480,31 @@ func fetchLocationMeta(location string) (locationMeta, error) {
 		if err != nil {
 			return meta, err
 		}
-		dbMeta.measurements = measurements
+		dbMeta.Measurements = measurements
 
-		rps, err := fetchRetentionPolicies(location, db)
+		rpsSettings, err := location.ShowRetentionPolicies(db)
 		if err != nil {
 			return meta, err
 		}
-		dbMeta.rps = rps
+		dbMeta.RpsSettings = rpsSettings
 
-		rpsSettings, err := fetchRetentionPoliciesWithSettings(location, db)
-		if err != nil {
-			return meta, err
+		rps := []string{}
+		for _, rp := range rpsSettings {
+			rps = append(rps, rp.Name)
 		}
-		dbMeta.rpsSettings = rpsSettings
+		dbMeta.Rps = rps
 
 		cqs, err := fetchContinuousQueries(location, db)
 		if err != nil {
 			return meta, err
 		}
-		dbMeta.cqs = cqs
+		dbMeta.Cqs = cqs
 
 		tagKeys, err := fetchTagKeys(location, db)
 		if err != nil {
 			return meta, err
 		}
-		dbMeta.tagKeys = tagKeys
+		dbMeta.TagKeys = tagKeys
 
 		series, err := FetchSeries(location, db)
 		if err != nil {
@@ -438,32 +516,140 @@ func fetchLocationMeta(location string) (locationMeta, error) {
 }
 
 type locationMeta struct {
-	databases map[string]*databaseMeta
+	databases map[string]*DatabaseMeta
 }
 
 func newLocationMeta() locationMeta {
-	return locationMeta{map[string]*databaseMeta{}}
+	return locationMeta{map[string]*DatabaseMeta{}}
 }
 
-type databaseMeta struct {
-	measurements []string
-	rps          []string
-	rpsSettings  []RetentionPolicy
-	cqs          []ContinuousQuery
-	tagKeys      map[string]bool
+type DatabaseMeta struct {
+	Measurements []string
+	Rps          []string
+	RpsSettings  []RetentionPolicy
+	Cqs          []ContinuousQuery
+	TagKeys      map[string]bool
 	series       []Series
 }
 
-func newDatabaseMeta() *databaseMeta {
-	return &databaseMeta{
-		measurements: []string{},
-		rps:          []string{},
-		rpsSettings:  []RetentionPolicy{},
-		cqs:          []ContinuousQuery{},
-		tagKeys:      map[string]bool{},
+func newDatabaseMeta() *DatabaseMeta {
+	return &DatabaseMeta{
+		Measurements: []string{},
+		Rps:          []string{},
+		RpsSettings:  []RetentionPolicy{},
+		Cqs:          []ContinuousQuery{},
+		TagKeys:      map[string]bool{},
 		series:       []Series{}}
 }
 
+type InfluxClient struct {
+	influx.Client
+	Name string
+}
+
+func NewInfluxClient(client influx.Client) *InfluxClient {
+	return &InfluxClient{Client: client}
+}
+
+func NewInfluxClientWithUsingHTTP(addr, username, password string) (*InfluxClient, error) {
+	config := influx.HTTPConfig{
+		Addr: addr,
+		Username: username,
+		Password: password,
+	}
+	client, err := influx.NewHTTPClient(config)
+	if err != nil {
+		return nil, err
+	}
+	return NewInfluxClient(client), nil
+}
+
+func (c *InfluxClient) String() string {
+	return c.Name
+}
+
+func (c *InfluxClient) DropSeriesFrom(db, msmt string) error {
+	_, err := c.Query(influx.NewQuery("DROP SERIES FROM " + msmt, db, "ns"))
+	return err
+}
+
+func (c *InfluxClient) DropSeriesFromWhere(db, msmt string, where string) error {
+	_, err := c.Query(influx.NewQuery(fmt.Sprintf("DROP SERIES FROM %s WHERE %s", msmt, where), db, "ns"))
+	return err
+}
+
+func (c *InfluxClient) ShowMeasurements(db string) ([]string, error) {
+	resps, err := c.Query(influx.NewQuery("SHOW MEASUREMENTS", db, "ns"))
+	if err != nil {
+		return nil, err
+	}
+	var msmts []string
+	for _, row := range resps.Results[0].Series {
+		for _, value := range row.Values {
+			msmts = append(msmts, value[0].(string))
+		}
+	}
+	return msmts, nil
+}
+
+func (c *InfluxClient) ShowRetentionPolicies(db string) ([]RetentionPolicy, error) {
+	resps, err := c.Query(influx.NewQuery("SHOW RETENTION POLICIES", db, "ns"))
+	if err != nil {
+		return nil, err
+	}
+	var rps []RetentionPolicy
+	for _, row := range resps.Results[0].Series {
+		for _, value := range row.Values {
+			rps = append(rps, RetentionPolicy{
+				Name:               value[0].(string),
+				Duration:           value[1].(string),
+				ShardGroupDuration: value[2].(string),
+				Replicas:           int(value[3].(float64)),
+				Default:            value[4].(bool),
+			})
+		}
+	}
+	return rps, nil
+}
+
+func (c *InfluxClient) ShowContinuousQueries(db string) ([]ContinuousQuery, error) {
+	resps, err := c.Query(influx.NewQuery("SHOW CONTINUOUS QUERIES", db, "ns"))
+	if err != nil {
+		return nil, err
+	}
+	var cqs []ContinuousQuery
+	for _, row := range resps.Results[0].Series {
+		for _, value := range row.Values {
+			cqs = append(cqs, ContinuousQuery{
+				Name:  value[0].(string),
+				Query: value[1].(string),
+			})
+		}
+	}
+	return cqs, nil
+}
+
+func (c *InfluxClient) FetchTagKeys(location, db string) (map[string]bool, error) {
+	resps, err := c.Query(influx.NewQuery("SHOW TAG KEYS", db, "ns"))
+	if err != nil {
+		return nil, err
+	}
+	tags := make(map[string]bool)
+	for _, r := range resps.Results {
+		for _, row := range r.Series {
+			for _, values := range row.Values {
+				for _, value := range values {
+					tags[row.Name+"."+value.(string)] = true
+				}
+			}
+		}
+	}
+	return tags, nil
+}
+
+ // THIS entire component need to be refactored to use the influx client.
+ // We could also wrap it to support decoding responses and creating new things.
+ // Also, we it should have inbuilt retry support or the ability to configure it.
 func get(q string, location string, db string, chunked bool) (*http.Response, error) {
 	client := &http.Client{}
 	params := []string{"db=" + db, "q=" + q, "chunked=" + strconv.FormatBool(chunked)}
@@ -489,122 +675,15 @@ func getWithRetry(client *http.Client, url string, attempts int) (*http.Response
 	return nil, err
 }
 
-func fetchMeasurements(location, db string) ([]string, error) {
-	return fetchShow("MEASUREMENTS", location, db)
-}
-
-func fetchDatabases(location string) ([]string, error) {
-	return fetchShow("DATABASES", location, "")
-}
-
-func fetchRetentionPolicies(location, db string) ([]string, error) {
-	return fetchShow("RETENTION POLICIES", location, db)
-}
-
-func fetchRetentionPoliciesWithSettings(location, db string) ([]RetentionPolicy, error) {
-	results, err := fetchSimple(`SHOW RETENTION POLICIES`, location, db)
-	if err != nil {
-		return nil, err
-	}
-	var rps []RetentionPolicy
-	for _, row := range results[0].Series {
-		for _, value := range row.Values {
-			rps = append(rps, RetentionPolicy{
-				Name:               value[0].(string),
-				Duration:           value[1].(string),
-				ShardGroupDuration: value[2].(string),
-				Replicas:           int(value[3].(float64)),
-				Default:            value[4].(bool),
-			})
-		}
-	}
-	return rps, nil
-}
-
-func fetchContinuousQueries(location, db string) ([]ContinuousQuery, error) {
-	results, err := fetchSimple(`SHOW CONTINUOUS QUERIES`, location, db)
-	if err != nil {
-		return nil, err
-	}
-	var cqs []ContinuousQuery
-	for _, row := range results[0].Series {
-		for _, value := range row.Values {
-			cqs = append(cqs, ContinuousQuery{
-				Name:  value[0].(string),
-				Query: value[1].(string),
-			})
-		}
-	}
-	return cqs, nil
-}
-
-func fetchTagKeys(location, db string) (map[string]bool, error) {
-	results, err := fetchSimple(`SHOW TAG KEYS`, location, db)
-	if err != nil {
-		return nil, err
-	}
-	tags := make(map[string]bool)
-	for _, r := range results {
-		for _, row := range r.Series {
-			for _, values := range row.Values {
-				for _, value := range values {
-					tags[row.Name+"."+value.(string)] = true
-				}
-			}
-		}
-	}
-	return tags, nil
-}
-
-func fetchShow(name, location, db string) ([]string, error) {
-	results, err := fetchSimple(`SHOW `+name, location, db)
-	if err != nil {
-		return nil, err
-	}
-	msmts := []string{}
-	for _, row := range results[0].Series {
-		for _, value := range row.Values {
-			msmts = append(msmts, value[0].(string))
-		}
-	}
-	return msmts, nil
-}
-
-func fetchSimple(q, location, db string) ([]result, error) {
-	resp, err := get(q, location, db, false)
-	// TODO handle not able to connect
-	if err != nil {
-		return nil, err
-	}
-	respData, readErr := ioutil.ReadAll(resp.Body)
-	// TODO handle invalid location
-	if readErr != nil {
-		return nil, readErr
-	}
-	var r response
-	jsonErr := json.Unmarshal(respData, &r)
-	// TODO Figure out what to do if we can't parse the data, which could happen if we are not requesting correctly.
-	if err != nil {
-		log.Panic(fmt.Errorf("parsing fetched data failed: " + jsonErr.Error()))
-	}
-	return r.Results, nil
-}
-
-func fetchTokenData(token int, location, db, rp string, measurement string) (chan result, error) {
-	// TODO limit data retrieved. Also consider allowign checkpointing with smaller amount of data.
-	// TODO it should only filter on partition if the measurement has a corresponding partition key.
-	return streamData(location, db, rp, measurement, cluster.PartitionTagName+` = '`+strconv.Itoa(token)+`'`)
-}
-
-func streamData(location, db, rp string, measurement string, where string) (chan result, error) {
+func streamData(location InfluxClient, db, rp string, measurement string, where string) (chan influx.Result, error) {
 	var stmt = `SELECT * FROM ` + rp + "." + measurement
 	if where != "" {
 		stmt += ` WHERE ` + where
 	}
-	ch := make(chan result)
+	ch := make(chan influx.Result)
 
 	// Check if it is able to respond to fail fast
-	_, err := get(limitQuery(stmt, 1, 0), location, db, true)
+	_, err := location.Query(influx.NewQuery(limitQuery(stmt, 1, 0), db, "rfc3339"))
 	if err != nil {
 		return ch, err
 	}
@@ -619,22 +698,14 @@ func streamData(location, db, rp string, measurement string, where string) (chan
 			limitedQuery := limitQuery(stmt, limit, offset)
 
 			// If there is an error here, it is not much we can do.
-			resp, err := get(limitedQuery, location, db, true)
+			resp, err := location.Query(influx.NewQuery(limitedQuery, db, "rfc3339"))
 			if err != nil {
 				return
 			}
 
-			scanner := bufio.NewScanner(resp.Body)
-			for scanner.Scan() {
-				var r response
-				err := json.Unmarshal([]byte(scanner.Text()), &r)
-				if err != nil {
-					continue
-				}
-				for _, result := range r.Results {
-					ch <- result
-					resultCount += len(result.Series)
-				}
+			for _, result := range resp.Results {
+				ch <- result
+				resultCount += len(result.Series)
 			}
 
 			offset += limit

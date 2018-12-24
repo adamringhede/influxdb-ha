@@ -11,8 +11,8 @@ const (
 	ReliableImportWorkName = "import"
 )
 
-// TODO consider maybe including the measurements if we have this information to start with.
-// We need a way to keep track of measurements imported that does not have a partition key.
+// TODO consider maybe including the Measurements if we have this information to start with.
+// We need a way to keep track of Measurements imported that does not have a partition key.
 // Or if they do not have a partition key, we will import them first or last according to the checkpoint
 type ReliableImportPayload struct {
 	Tokens         []int `json:"Tokens"`
@@ -66,7 +66,7 @@ func (imp *ReliableImporter) Stop() {
 
 func (imp *ReliableImporter) process(taskID string, payload ReliableImportPayload, checkpoint ReliableImportCheckpoint) {
 	lastIndex := checkpoint.TokenIndex
-	log.Printf("Processing task: Import (%s)", taskID)
+	log.Printf("Processing task: ImportPartitioned (%s)", taskID)
 
 	task := cluster.Task{}
 	task.ID = taskID
@@ -88,8 +88,8 @@ func (imp *ReliableImporter) process(taskID string, payload ReliableImportPayloa
 		// TODO handle failure to import by trying again later. This depends on the error of course and should only try again later if the error is recoverable.
 
 		// maybe instead of just using tokens, the importer also can take an option of a batch size which could be in terms of series or points imported.
-		// also, it could be a good idea to distribute databases (not measurements as some queries need them to be one the same node)
-		imp.importer.Import([]int{token}, imp.target)
+		// also, it could be a good idea to distribute databases (not Measurements as some queries need them to be one the same node)
+		imp.importer.ImportPartitioned([]int{token}, imp.target)
 		checkpoint.TokenIndex = i + 1
 		task.Checkpoint = checkpoint
 

@@ -68,7 +68,7 @@ func TestImporter(t *testing.T) {
 	partitioner.AddKey(cluster.PartitionKey{Database: testDB, Measurement: "treasures", Tags: []string{"type"}})
 
 	importer := NewImporter(resolver, partitioner, AlwaysPartitionImport)
-	importer.Import([]int{3012244896}, influxTwo)
+	importer.ImportPartitioned([]int{3012244896}, influxTwo)
 
 	time.Sleep(10 * time.Millisecond)
 	results, err := fetchSimple("SELECT * FROM treasures", influxTwo, testDB)

@@ -61,7 +61,7 @@ func joinExisting(localNode *cluster.Node, tokenStorage cluster.LockableTokenSto
 	}
 
 	log.Println("Starting import of primary data")
-	importer.Import(reserved, localNode.DataLocation)
+	importer.ImportPartitioned(reserved, localNode.DataLocation)
 
 	oldDataHolders := map[int][]*cluster.Node{}
 	for _, token := range reserved {
@@ -93,7 +93,7 @@ func joinExisting(localNode *cluster.Node, tokenStorage cluster.LockableTokenSto
 	}
 	if len(secondaryTokens) > 0 {
 		log.Println("Starting import of replicated data")
-		importer.Import(secondaryTokens, localNode.DataLocation)
+		importer.ImportPartitioned(secondaryTokens, localNode.DataLocation)
 	}
 
 	// Importing non partitioned after tokens been assigned to get primary and secondary data.
