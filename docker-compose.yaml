@@ -3,7 +3,7 @@ services:
   influxdb-handle:
     build:
       context: ./
-      dockerfile: Dockerfile_handle
+      dockerfile: Dockerfile
     image: influxdb-ha/handle
     ports:
       - "8084:8084"

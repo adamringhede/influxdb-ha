@@ -1,5 +1,4 @@
 build:
-	docker build -f Dockerfile_relay -t influxdb-relay:latest .
 	go build -o ./bin/routerd ./cmd/routerd/main.go
 	go build -o ./bin/handle ./cmd/handle/main.go
 
@@ -11,5 +10,5 @@ test:
 	go test ./syncing/...
 
 push-dockerhub:
-	docker build -t adamringhede/influxdb-cluster -f Dockerfile_handle . && \
+	docker build -t adamringhede/influxdb-cluster -f Dockerfile . && \
 	docker push adamringhede/influxdb-cluster
