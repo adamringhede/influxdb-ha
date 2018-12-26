@@ -3,6 +3,7 @@ package syncing
 import (
 	"fmt"
 	"github.com/adamringhede/influxdb-ha/cluster"
+	influx "github.com/influxdata/influxdb/client/v2"
 	"strings"
 )
 
@@ -40,7 +41,7 @@ func (s Series) Matches(token int, pk cluster.PartitionKey, resolver *cluster.Re
 		return false
 	}
 	hash, err := cluster.GetHash(pk, s.filterTagsByPartitionKey(pk))
-	if err != nil{
+	if err != nil {
 		return false
 	}
 	resolvedToken, ok := resolver.FindTokenByKey(hash)
@@ -50,7 +51,7 @@ func (s Series) Matches(token int, pk cluster.PartitionKey, resolver *cluster.Re
 	return resolvedToken == token
 }
 
-func (s Series) filterTagsByPartitionKey(pk cluster.PartitionKey) (map[string][]string) {
+func (s Series) filterTagsByPartitionKey(pk cluster.PartitionKey) map[string][]string {
 	result := map[string][]string{}
 	for _, tag := range pk.Tags {
 		if tagValue, hasTag := s.Tags[tag]; hasTag {
@@ -63,14 +64,15 @@ func (s Series) filterTagsByPartitionKey(pk cluster.PartitionKey) (map[string][]
 	return result
 }
 
-func FetchSeries(location string, db string) (series []Series, err error) {
+func FetchSeries(location *InfluxClient, db string) (series []Series, err error) {
 	offset := 0
 	limit := 1000
 	for {
-		results, fetchErr := fetchSimple(fmt.Sprintf(`SHOW SERIES LIMIT %d OFFSET %d`, limit, offset), location, db)
+		resps, fetchErr := location.Query(influx.NewQuery(fmt.Sprintf(`SHOW SERIES LIMIT %d OFFSET %d`, limit, offset), db, "ns"))
 		if fetchErr != nil {
 			return series, fetchErr
 		}
+		results := resps.Results
 		for _, result := range results {
 			for _, resultSeries := range result.Series {
 				for _, key := range resultSeries.Values {

@@ -1,6 +1,7 @@
 package syncing
 
 import (
+	influx "github.com/influxdata/influxdb/client/v2"
 	"testing"
 
 	"time"
@@ -9,20 +10,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	)
 
-const influxOne = "127.0.0.1:28086"
-const influxTwo = "127.0.0.1:27086"
-const influxThree = "127.0.0.1:26086"
+var influxOne, _ = NewInfluxClientHTTP("127.0.0.1:28086", "", "")
+var influxTwo, _ = NewInfluxClientHTTP("127.0.0.1:27086", "", "")
+var influxThree, _ = NewInfluxClientHTTP("127.0.0.1:26086", "", "")
 const etcdLoc = "127.0.0.1:2379"
 const testDB = "sharded"
 
-func multiple(location string, commands []string) {
+func multiple(location *InfluxClient, commands []string) {
 	for _, q := range commands {
-		resp, err := get(q, location, "", false)
+		_, err := location.Query(influx.NewQuery(q, "", "ns"))
 		if err != nil {
 			panic(err)
-		}
-		if resp.StatusCode != 200 {
-			panic("Status code is not 200")
 		}
 	}
 }
@@ -46,11 +44,20 @@ func Test_fetchLocationMeta(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+
+func newTestPoint(tag string, value float64) *influx.Point {
+	point, err := influx.NewPoint("treasures", map[string]string{"type": tag}, map[string]interface{}{"value": value})
+	if err != nil {
+		panic(err)
+	}
+	return point
+}
+
 func TestImporter(t *testing.T) {
 	initiate()
 	resolver := cluster.NewResolver()
 	for _, token := range []int{3012244896, 3960162835} {
-		resolver.AddToken(token, &cluster.Node{[]int{}, cluster.NodeStatusUp, influxOne, "influx-1"})
+		resolver.AddToken(token, &cluster.Node{[]int{}, cluster.NodeStatusUp, influxOne.Location, "influx-1"})
 	}
 
 	multiple(influxOne, []string{
@@ -59,10 +66,10 @@ func TestImporter(t *testing.T) {
 			" BEGIN SELECT mean(value) INTO mean_treasure FROM treasures GROUP BY time(1h) END",
 	})
 
-	postLines(influxOne, testDB, "autogen", []string{
-		"treasures,type=gold," + cluster.PartitionTagName + "=3966162835 value=5",
-		"treasures,type=silver," + cluster.PartitionTagName + "=3042244896 value=4",
-	})
+	writePoints([]*influx.Point{
+		newTestPoint("gold", 5),
+		newTestPoint("silver", 4),
+	}, influxOne, testDB, "autogen")
 
 	partitioner := cluster.NewPartitioner()
 	partitioner.AddKey(cluster.PartitionKey{Database: testDB, Measurement: "treasures", Tags: []string{"type"}})
@@ -71,15 +78,15 @@ func TestImporter(t *testing.T) {
 	importer.ImportPartitioned([]int{3012244896}, influxTwo)
 
 	time.Sleep(10 * time.Millisecond)
-	results, err := fetchSimple("SELECT * FROM treasures", influxTwo, testDB)
+	resp, err := influxTwo.Query(influx.NewQuery("SELECT * FROM treasures", testDB, "ns"))
 	assert.NoError(t, err)
-	assert.Len(t, results[0].Series[0].Values, 1)
-	assert.Equal(t, "silver", results[0].Series[0].Values[0][2].(string))
+	assert.Len(t, resp.Results[0].Series[0].Values, 1)
+	assert.Equal(t, "silver", resp.Results[0].Series[0].Values[0][1].(string))
 
-	results, err = fetchSimple("SHOW RETENTION POLICIES", influxTwo, testDB)
-	assert.Len(t, results[0].Series[0].Values, 2) // autogen + 1
+	rps, err := influxTwo.ShowRetentionPolicies(testDB)
+	assert.Len(t, rps, 2) // autogen + 1
 
-	results, err = fetchSimple("SHOW CONTINUOUS QUERIES", influxTwo, testDB)
-	assert.Len(t, results[0].Series[1].Values, 1)
+	cqs, err := influxTwo.ShowContinuousQueries(testDB)
+	assert.Len(t, cqs, 1)
 
 }

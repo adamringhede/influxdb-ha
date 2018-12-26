@@ -37,7 +37,7 @@ func NewLauncher(clusterID string, nodeName string, etcdEndpoints string, dataLo
 	handleErr(etcdErr)
 
 	if err := isHttpAvailable(dataLocation); err != nil {
-		log.Panicf("Error: Could not reach InfluxDB at %s because of %s", dataLocation, err)
+		log.Panicf("Could not reach InfluxDB at %s because of %s", dataLocation, err)
 	}
 
 	// Setup storage components
@@ -182,7 +182,8 @@ func handleErr(err error) {
 func startImporter(importer syncing.Importer, etcdClient *clientv3.Client, resolver *cluster.Resolver, localNode cluster.Node, clusterID string) (*syncing.ReliableImporter, cluster.WorkQueue) {
 	wq := cluster.NewEtcdWorkQueue(etcdClient, localNode.Name, syncing.ReliableImportWorkName)
 	wq.ClusterID = clusterID
-	reliableImporter := syncing.NewReliableImporter(importer, wq, resolver, localNode.DataLocation)
+	targetClient, _ := syncing.NewInfluxClientHTTPFromNode(localNode)
+	reliableImporter := syncing.NewReliableImporter(importer, wq, resolver, targetClient)
 	go reliableImporter.Start()
 	return reliableImporter, wq
 }

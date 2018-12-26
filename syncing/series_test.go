@@ -1,6 +1,8 @@
 package syncing
 
 import (
+	influx "github.com/influxdata/influxdb/client/v2"
+
 	"testing"
 	"time"
 )
@@ -13,12 +15,12 @@ func TestGetSeriesByPartitionKey(t *testing.T) {
 
 	time.Sleep(1000 * time.Millisecond)
 
-	postLines(influxOne, testDB, "autogen", []string{
-		"treasures,type=gold,captain=foo value=5",
-		"treasures,type=silver,captain=bar value=4",
-		"treasures,type=trash value=4",
-		"treasures,captain=foo value=4",
-	})
+	writePoints([]*influx.Point{
+    		newTestPoint("gold", 5),
+    		newTestPoint("silver", 4),
+    		newTestPoint("trash", 4),
+            newTestPoint("foo", 4),
+    	}, influxOne, testDB, "autogen")
 
 	time.Sleep(1000 * time.Millisecond)
 	FetchSeries(influxOne, testDB)

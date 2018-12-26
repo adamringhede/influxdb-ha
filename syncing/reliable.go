@@ -30,13 +30,13 @@ type ReliableImporter struct {
 	importer     Importer
 	wq           cluster.WorkQueue
 	resolver     *cluster.Resolver
-	target       string
+	target       *InfluxClient
 	stopChan     chan bool
 	tokenStorage cluster.TokenStorage
 	AfterImport  func(token int)
 }
 
-func NewReliableImporter(importer Importer, wq cluster.WorkQueue, resolver *cluster.Resolver, target string) *ReliableImporter {
+func NewReliableImporter(importer Importer, wq cluster.WorkQueue, resolver *cluster.Resolver, target *InfluxClient) *ReliableImporter {
 	return &ReliableImporter{importer: importer, wq: wq, resolver: resolver, target: target, stopChan: make(chan bool)}
 }
 

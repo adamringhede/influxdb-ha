@@ -1,6 +1,7 @@
 package syncing
 
 import (
+	influx "github.com/influxdata/influxdb/client/v2"
 	"testing"
 	"time"
 
@@ -13,13 +14,13 @@ func setUpReliableTest() (*clientv3.Client, *cluster.Resolver) {
 	initiate()
 	resolver := cluster.NewResolver()
 	for _, token := range []int{0, 100} {
-		resolver.AddToken(token, &cluster.Node{[]int{}, cluster.NodeStatusUp, influxOne, "influx-1"})
+		resolver.AddToken(token, &cluster.Node{[]int{}, cluster.NodeStatusUp, influxOne.Location, "influx-1"})
 	}
 
-	postLines(influxOne, testDB, "autogen", []string{
-		"treasures,type=gold," + cluster.PartitionTagName + "=0 value=5",
-		"treasures,type=silver," + cluster.PartitionTagName + "=100 value=4",
-	})
+	writePoints([]*influx.Point{
+		newTestPoint("gold", 5),
+		newTestPoint("silver", 4),
+	}, influxOne, testDB, "autogen")
 	time.Sleep(500 * time.Millisecond)
 
 	etcdClient, err := clientv3.New(clientv3.Config{
@@ -31,7 +32,6 @@ func setUpReliableTest() (*clientv3.Client, *cluster.Resolver) {
 	}
 	return etcdClient, resolver
 }
-
 
 func TestReliableImporter(t *testing.T) {
 	etcdClient, resolver := setUpReliableTest()
@@ -71,8 +71,8 @@ func TestReliableImporter(t *testing.T) {
 	// Give time to allow it to import
 	time.Sleep(100 * time.Millisecond)
 
-	results, err := fetchSimple("SELECT * FROM treasures", influxTwo, testDB)
+	resp, err := influxTwo.Query(influx.NewQuery("SELECT * FROM treasures", testDB, "ns"))
 	assert.NoError(t, err)
-	assert.Len(t, results[0].Series[0].Values, 2)
-	assert.Equal(t, "gold", results[0].Series[0].Values[0][2].(string))
+	assert.Len(t, resp.Results[0].Series[0].Values, 2)
+	assert.Equal(t, "gold", resp.Results[0].Series[0].Values[0][1].(string))
 }

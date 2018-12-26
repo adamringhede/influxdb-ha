@@ -61,7 +61,8 @@ func joinExisting(localNode *cluster.Node, tokenStorage cluster.LockableTokenSto
 	}
 
 	log.Println("Starting import of primary data")
-	importer.ImportPartitioned(reserved, localNode.DataLocation)
+	targetClient, _ := syncing.NewInfluxClientHTTPFromNode(*localNode)
+	importer.ImportPartitioned(reserved, targetClient)
 
 	oldDataHolders := map[int][]*cluster.Node{}
 	for _, token := range reserved {
@@ -84,6 +85,8 @@ func joinExisting(localNode *cluster.Node, tokenStorage cluster.LockableTokenSto
 		resolver.AddToken(token, localNode)
 	}
 
+	localNodeClient, _ := syncing.NewInfluxClientHTTPFromNode(*localNode)
+
 	// This takes one token and finds what tokens are also replicated to to the same node this node is assigned to.
 	// This can only be done after assigning the tokens as the resolver needs to understand which
 	// nodes tokens are allocated to, as the logic is skipping tokens assigned to the same node.
@@ -93,11 +96,11 @@ func joinExisting(localNode *cluster.Node, tokenStorage cluster.LockableTokenSto
 	}
 	if len(secondaryTokens) > 0 {
 		log.Println("Starting import of replicated data")
-		importer.ImportPartitioned(secondaryTokens, localNode.DataLocation)
+		importer.ImportPartitioned(secondaryTokens, localNodeClient)
 	}
 
 	// Importing non partitioned after tokens been assigned to get primary and secondary data.
-	importer.ImportNonPartitioned(localNode.DataLocation)
+	importer.ImportNonPartitioned(localNodeClient)
 
 	// The filtered list of primaries which not longer should hold data for assigned tokens.
 	deleteMap := map[int]*cluster.Node{}
@@ -128,7 +131,8 @@ func deleteTokensData(tokenLocations map[int]*cluster.Node, importer syncing.Imp
 	g.Add(len(tokenLocations))
 	for token, node := range tokenLocations {
 		go (func(token int, node *cluster.Node) {
-			err := importer.DeleteByToken(node.DataLocation, token)
+			targetClient, _ := syncing.NewInfluxClientHTTPFromNode(*node)
+			err := importer.DeleteByToken(targetClient, token)
 			if err != nil {
 				log.Printf("Failed to delete data at %s (%s) with token %d\n", node.Name, node.DataLocation, token)
 			}
