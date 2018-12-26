@@ -98,6 +98,11 @@ func measurementHasPartitionKey(db, msmt string, pks []cluster.PartitionKey) boo
 	return false
 }
 
+type ImportBookmark interface {
+	Set(db, rp, measurement string, timestamp int, done bool)
+	Get(db, rp, measurement string) (int, bool, bool)
+}
+
 type InfluxImporter struct {
 	MetaImporter
 }
@@ -106,29 +111,28 @@ func NewInfluxImporter() *InfluxImporter {
 	return &InfluxImporter{}
 }
 
-type Checkpoint struct {
-	db, rp, msmt string
-	timestamp    int
-}
-
-func NewCheckpoint(db string, rp string, msmt string, timestamp int) *Checkpoint {
-	return &Checkpoint{db: db, rp: rp, msmt: msmt, timestamp: timestamp}
-}
-
-func (i *InfluxImporter) ImportAll(location, target *InfluxClient, checkpointFn func(checkpoint Checkpoint)) {
-	// This does not work when using bookmarks or to filter some of them.
-	// This needs to be a completely different component. In some way we need to reuse some functions
-	// TODO Mirroring requires authentication as well on both reading and writing so many of these methods need to be rewritten.
+func (i *InfluxImporter) ImportAll(location, target *InfluxClient, bookmark ImportBookmark) {
+	errorCount := 0
 	i.forEachDatabase(location, target, func(db string, dbMeta *DatabaseMeta) {
 		for _, msmt := range dbMeta.Measurements {
 			for _, rp := range dbMeta.Rps {
-				importCh, _ := streamData(location, db, rp, msmt, "")
+				offsetTime, _, _ := bookmark.Get(db, rp, msmt)
+				importCh, err := streamData(location, db, rp, msmt, fmt.Sprintf("time > '%s'", time.Unix(0, int64(offsetTime)).Format(time.RFC3339)))
+				if err != nil {
+					fmt.Printf("Failed to fetch data: %s", err.Error())
+					errorCount++
+					if errorCount > 10 {
+						fmt.Printf("Received 10 errors during import from %s and giving up.", db)
+						return
+					}
+				}
 				for res := range importCh {
 					points := convertResultToPoints(res, dbMeta)
-					writePoints(points, target, db, rp)
-					//checkpointFn(NewCheckpoint(db, rp, msmt, )) // need to get the timestamp from the latest checkpoint
+					if len(points) > 0 {
+						writePoints(points, target, db, rp)
+						bookmark.Set(db, rp, msmt, int(points[len(points)-1].Time().UnixNano()), false)
+					}
 				}
-
 			}
 		}
 	})
@@ -507,7 +511,7 @@ func NewInfluxClientHTTPFromNode(node cluster.Node) (*InfluxClient, error) {
 }
 
 func (c *InfluxClient) String() string {
-	return c.Name
+	return fmt.Sprintf("Influx(Name=%s, Location=%)", c.Name, c.Location)
 }
 
 func (c *InfluxClient) DropSeriesFrom(db, msmt string) error {
@@ -640,6 +644,7 @@ func streamData(location *InfluxClient, db, rp string, measurement string, where
 	if where != "" {
 		stmt += ` WHERE ` + where
 	}
+	stmt += " ORDER BY time asc"
 	ch := make(chan influx.Result)
 
 	// Check if it is able to respond to fail fast
