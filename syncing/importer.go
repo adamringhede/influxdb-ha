@@ -511,7 +511,7 @@ func NewInfluxClientHTTPFromNode(node cluster.Node) (*InfluxClient, error) {
 }
 
 func (c *InfluxClient) String() string {
-	return fmt.Sprintf("Influx(Name=%s, Location=%)", c.Name, c.Location)
+	return fmt.Sprintf("Influx(Name=%s, Location=%s)", c.Name, c.Location)
 }
 
 func (c *InfluxClient) DropSeriesFrom(db, msmt string) error {
