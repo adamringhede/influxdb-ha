@@ -1,11 +1,11 @@
 package service
 
 import (
+	"context"
 	"github.com/adamringhede/influxdb-ha/cluster"
 	"log"
 	"net/http"
 	"strconv"
-	"context"
 )
 
 type Config struct {
@@ -21,6 +21,7 @@ func Start(
 	ns cluster.NodeStorage,
 	auth AuthService,
 	config Config,
+	localNode *cluster.Node,
 	ctx context.Context) {
 
 	addr := config.BindAddr + ":" + strconv.FormatInt(int64(config.BindPort), 10)
@@ -29,6 +30,7 @@ func Start(
 
 	mux := http.NewServeMux()
 	mux.Handle("/", NewQueryHandler(resolver, partitioner, ch, auth))
+	mux.Handle("/ping", NewPingHandler(localNode))
 	mux.Handle("/write", NewWriteHandler(resolver, partitioner, auth, NewHttpPointsWriter(recovery)))
 
 	srv := http.Server{Addr: addr, Handler: mux}
@@ -41,7 +43,7 @@ func Start(
 
 	done := ctx.Done()
 	select {
-		case <-done:
-			srv.Close()
+	case <-done:
+		srv.Close()
 	}
 }

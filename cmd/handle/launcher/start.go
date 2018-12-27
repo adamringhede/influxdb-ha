@@ -129,7 +129,7 @@ func (l *Launcher) Run() {
 }
 
 func (l *Launcher) Listen(ctx context.Context) {
-	service.Start(l.resolver, l.partitioner, l.recovery, l.pks, l.ns, l.auth, l.httpConfig, ctx)
+	service.Start(l.resolver, l.partitioner, l.recovery, l.pks, l.ns, l.auth, l.httpConfig, l.localNode, ctx)
 }
 
 func (l *Launcher) Join() error {
