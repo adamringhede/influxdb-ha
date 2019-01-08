@@ -5,6 +5,11 @@ A distributed clustering system for production deployments of InfluxDB with high
 splitting individual series into chunks, called chards, based on time. In order to scale writes, it would not work to shard data using only time chunks as most writes would be made
 to the same chunk on the same node. Instead, in this implementation, entire series are distributed to different nodes which we call "partitioning".* 
 
+## Not ready for production
+Altough most functionality is implemented, it has not yet been tested with high load. There are possibly memory leaks and other performance issues that will surface when running in production.
+
+Also, some of the instructions below refer to functionality that is not yet implemented completely. 
+
 ## Etcd
 The cluster is dependent on etcd for storing data used for clustering mechanisms. It is preferable 
 to use a cluster of 3 etcd instances for high availability but it is not required as the cluster can function with degraded functionality while Etcd is unavailable.
