@@ -25,6 +25,8 @@ func TestQueryHandler_Coordinator_NoGroupingMultipleNodes(t *testing.T) {
 	handler := setUpSelectTest()
 	res := mustQueryCluster(t, handler, `select value from treasures WHERE time <= now() AND (type = 'gold' OR type = 'silver' OR type = 'trash')`)
 	assert.Len(t, res[0].Series[0].Values, 3)
+	assert.Equal(t, res[0].Series[0].Columns[0], "time")
+	assert.Equal(t, res[0].Series[0].Columns[1], "value")
 }
 
 func TestQueryHandler_Coordinator_NoGroupingMultipleNodesAggregation(t *testing.T) {

@@ -76,7 +76,7 @@ func mergeSortResults(groupedResults map[string][]Result, less compareLess) []Re
 		uniquePoints := make(map[string]bool, sumResultCounts(group))
 		merged := Result{}
 		merged.Series = []*models.Row{{
-			Columns: []string{},        // TODO make sure to set column and that they are in the same order from the results
+			Columns: group[0].Series[0].Columns,
 			Values:  [][]interface{}{}, // TODO preallocate memory for the values
 		}}
 		allDone := false
