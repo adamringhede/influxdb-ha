@@ -33,6 +33,27 @@ REMOVE NODE <hostname>
 influx -host $(minikube service influxc --format "{{.IP}}") -port $(minikube service influxc --format "{{.Port}}")  
 ```
 
+When the cluster is first started, you need to create an admin user. Then authenticate by typing `auth` and enter the credentials 'admin' and 'password' 
+```sql
+> CREATE USER admin WITH PASSWORD 'password' WITH ALL PRIVILEGES
+> auth
+username: admin
+password: 
+
+```
+
+Show what nodes are currently in the cluster. 
+```sql
+> SHOW NODES
+name: nodes
+name             data location
+----             -------------
+influx-cluster-0 localhost:8086
+influx-cluster-1 localhost:8086
+influx-cluster-2 localhost:8086
+```
+
+
 #### Dump meta data
 ```
 ETCDCTL_API=3 etcdctl --endpoints "$(minikube service etcd --url)"  get "" --prefix
