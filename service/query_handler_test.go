@@ -34,6 +34,12 @@ func TestQueryHandler_Coordinator_NoGroupingMultipleNodesAggregation(t *testing.
 	assert.Equal(t, 50., res[0].Series[0].Values[0][1])
 }
 
+func TestQueryHandler_Coordinator_MissingAggregateFunction(t *testing.T) {
+	handler := setUpSelectTest()
+	status, _ := mustNotQueryCluster(t, handler, `SELECT value FROM treasures WHERE time > now() - 5m AND (type = 'gold' OR type = 'silver' OR type = 'trash') GROUP BY time(1m)`)
+	assert.Equal(t, 400, status)
+}
+
 func TestQueryHandler_Admin_GrandAdmin(t *testing.T) {
 	storage := cluster.NewMockAuthStorage()
 	handler := NewQueryHandler(newTestResolver(), newPartitioner(),

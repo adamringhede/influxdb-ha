@@ -1,15 +1,16 @@
 package service
 
 import (
-	"github.com/influxdata/influxdb/models"
 	"bufio"
-	"net/http"
-	"io"
-	"fmt"
-	"net/url"
-	"log"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/influxdata/influxdb/models"
+	"io"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"net/url"
 )
 
 // Message represents a user-facing Message to be included with the Result.
@@ -104,9 +105,22 @@ func request(statement string, host string, client *http.Client, r *http.Request
 		return results, err, res
 	}
 	if res.StatusCode/100 != 2 {
-		return results, errors.New("failed request"), res
+		return results, errors.New(parseErrorResponseMessage(res)), res
 	}
 	chunked := r.URL.Query().Get("chunked") == "true"
 	response := parseResp(res.Body, chunked)
 	return response.Results, nil, res
+}
+
+func parseErrorResponseMessage(res *http.Response) string {
+	if body, err := ioutil.ReadAll(res.Body); err == nil {
+		var errMsg struct{
+			Error string `json:"error"`
+		}
+		err = json.Unmarshal(body, &errMsg)
+		if err == nil {
+			return errMsg.Error
+		}
+	}
+	return "failed request"
 }
