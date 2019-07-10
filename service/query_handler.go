@@ -59,7 +59,11 @@ func (h *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	for _, stmt := range q.Statements {
 		if route := h.routeFactory.Build(stmt, db); route != nil {
-			results := route(w, r, stmt)
+			results, routeErr := route(w, r, stmt)
+			if routeErr != nil {
+				// Assuming the routing has passed back an appropriate error message
+				return
+			}
 			allResults = append(allResults, results...)
 		} else {
 			// Not supported. Client must connect to the individual data node.

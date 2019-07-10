@@ -187,7 +187,7 @@ func RecoverNodes(hs *EtcdHintStorage, data RecoveryStorage, nodes NodeCollectio
 		for target := range hs.Local {
 			log.Printf("Found offline node %s, checking for signs of life...\n", target)
 			if targetNode, ok := nodes.Get(target); ok {
-				if isAlive(targetNode.DataLocation, client) {
+				if IsAlive(targetNode.DataLocation, client) {
 					err := recoverNode(targetNode, data)
 					if err == nil {
 						log.Printf("Finished recovering node %s\n", target)
@@ -223,7 +223,7 @@ func recoverNode(node Node, data RecoveryStorage) error {
 	return nil
 }
 
-func isAlive(location string, client *http.Client) bool {
+func IsAlive(location string, client *http.Client) bool {
 	resp, err := client.Get("http://" + location + "/ping")
 	return err == nil && resp.StatusCode >= 200 && resp.StatusCode <= 299
 }
