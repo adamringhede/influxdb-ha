@@ -72,9 +72,10 @@ func (imp *ReliableImporter) process(taskID string, payload ReliableImportPayloa
 	task.ID = taskID
 	task.Payload = payload
 
-	if payload.NonPartitioned {
+	if payload.NonPartitioned && !checkpoint.NonPartitioned {
 		imp.importer.ImportNonPartitioned(imp.target)
 
+		checkpoint.NonPartitioned = true
 		task.Checkpoint = checkpoint
 		imp.wq.CheckIn(task)
 	}
