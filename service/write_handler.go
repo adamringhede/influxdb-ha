@@ -181,7 +181,7 @@ func (w *HttpPointsWriter) relayToLocations(nodes []*cluster.Node, auth string, 
 		if rp != "" {
 			url = fmt.Sprintf("http://%s/write?db=%s&rp=%s", location, db, rp)
 		} else {
-			url = fmt.Sprintf("http://%s/write?db=%s", location, db, rp)
+			url = fmt.Sprintf("http://%s/write?db=%s", location, db)
 		}
 		req, err := http.NewRequest("POST", url, bytes.NewReader(buf))
 		if err != nil {
