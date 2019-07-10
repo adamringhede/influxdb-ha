@@ -177,7 +177,13 @@ func (w *HttpPointsWriter) relayToLocations(nodes []*cluster.Node, auth string, 
 		location := node.DataLocation
 
 		// TODO Create a proper http client for requesting InfluxDB to also support SSL and authentication
-		req, err := http.NewRequest("POST", fmt.Sprintf("http://"+location+"/write?db=%s&rp=%s", db, rp), bytes.NewReader(buf))
+		var url string
+		if rp != "" {
+			url = fmt.Sprintf("http://%s/write?db=%s&rp=%s", location, db, rp)
+		} else {
+			url = fmt.Sprintf("http://%s/write?db=%s", location, db, rp)
+		}
+		req, err := http.NewRequest("POST", url, bytes.NewReader(buf))
 		if err != nil {
 			return err
 		}
