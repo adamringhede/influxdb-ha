@@ -3,3 +3,4 @@
 kubectl delete -f influxc.yaml
 kubectl delete -f etcd.yaml
 kubectl delete pvc --all
+kubectl delete pv --all

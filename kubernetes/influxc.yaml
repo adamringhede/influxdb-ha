@@ -31,8 +31,10 @@ spec:
       containers:
       - name: influxc
         image: docker.io/adamringhede/influxdb-cluster:latest
-        command: ["bin/handle"]
-        args: ["-etcd", "etcd:2379", "-client-port", "8087", "-data", "localhost:8086"]
+        command:
+          - "/bin/bash"
+          - "-c"
+          - "bin/handle -etcd etcd:2379 -client-port 8087 -data $(hostname).influxc:8086"
         ports:
         - containerPort: 8087
           name: web
