@@ -58,7 +58,7 @@ func (s *LocalRecoveryStorage) getOrCreateFile(nodeName, db, rp string) (*os.Fil
 	}
 	f, err := os.OpenFile(fp, os.O_WRONLY, os.ModeAppend)
 	if _, ok := err.(*os.PathError); ok {
-		log.Printf("Creatings recovery file at %s", fp)
+		log.Printf("Creating recovery file at %s", fp)
 		dir := filepath.Dir(fp)
 		if dir != "." {
 			err = os.MkdirAll(dir, os.ModePerm)
@@ -67,8 +67,13 @@ func (s *LocalRecoveryStorage) getOrCreateFile(nodeName, db, rp string) (*os.Fil
 			}
 		}
 		f, err = os.Create(fp)
-		f.WriteString(db + "\n")
-		f.WriteString(rp + "\n")
+		if f == nil {
+			return nil, fmt.Errorf("failed to create file at %s", fp)
+		}
+		if err != nil {
+			_, err = f.WriteString(db + "\n")
+			_, err = f.WriteString(rp + "\n")
+		}
 	}
 	if err != nil {
 		return f, err
