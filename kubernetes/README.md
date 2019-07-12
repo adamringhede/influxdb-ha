@@ -48,9 +48,10 @@ Show what nodes are currently in the cluster.
 name: nodes
 name             data location
 ----             -------------
-influx-cluster-0 localhost:8086
-influx-cluster-1 localhost:8086
-influx-cluster-2 localhost:8086
+influx-cluster-0 influx-cluster-0.influxc:8086
+influx-cluster-1 influx-cluster-1.influxc:8086
+influx-cluster-2 influx-cluster-2.influxc:8086
+
 ```
 
 
