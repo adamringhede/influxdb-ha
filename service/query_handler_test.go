@@ -9,20 +9,26 @@ import (
 )
 
 func TestQueryHandler_Coordinator_DistributeQueryAndAggregateResults(t *testing.T) {
-	handler := setUpSelectTest()
+	handler := setUpSelectTest(true)
 	res := mustQueryCluster(t, handler, `select mean(value) from treasures WHERE time <= now() AND (type = 'gold' OR type = 'trash') GROUP BY time(1d) LIMIT 1`)
 	assert.IsType(t, float64(1), res[0].Series[0].Values[0][0])
 	assert.Equal(t, 50., res[0].Series[0].Values[0][1])
 }
 
+func TestQueryHandler_Coordinator_DistributeQueryNoData(t *testing.T) {
+	handler := setUpSelectTest(false)
+	res := mustQueryCluster(t, handler, `select mean(value) from treasures WHERE time <= now() AND (type = 'gold' OR type = 'trash') GROUP BY time(1d) LIMIT 1`)
+	assert.Nil(t, res[0].Series)
+}
+
 func TestQueryHandler_Coordinator_SingleNode(t *testing.T) {
-	handler := setUpSelectTest()
+	handler := setUpSelectTest(true)
 	res := mustQueryCluster(t, handler, `select mean(value) from treasures WHERE time <= now() AND type = 'gold' GROUP BY time(1d) LIMIT 1`)
 	assert.Equal(t, 100., res[0].Series[0].Values[0][1])
 }
 
 func TestQueryHandler_Coordinator_NoGroupingMultipleNodes(t *testing.T) {
-	handler := setUpSelectTest()
+	handler := setUpSelectTest(true)
 	res := mustQueryCluster(t, handler, `select value from treasures WHERE time <= now() AND (type = 'gold' OR type = 'silver' OR type = 'trash')`)
 	assert.Len(t, res[0].Series[0].Values, 3)
 	assert.Equal(t, res[0].Series[0].Columns[0], "time")
@@ -30,14 +36,14 @@ func TestQueryHandler_Coordinator_NoGroupingMultipleNodes(t *testing.T) {
 }
 
 func TestQueryHandler_Coordinator_NoGroupingMultipleNodesAggregation(t *testing.T) {
-	handler := setUpSelectTest()
+	handler := setUpSelectTest(true)
 	res := mustQueryCluster(t, handler, `select mean(value) from treasures WHERE time <= now() AND (type = 'gold' OR type = 'silver' OR type = 'trash')`)
 	assert.Len(t, res[0].Series[0].Values, 1)
 	assert.Equal(t, 50., res[0].Series[0].Values[0][1])
 }
 
 func TestQueryHandler_Coordinator_MissingAggregateFunction(t *testing.T) {
-	handler := setUpSelectTest()
+	handler := setUpSelectTest(true)
 	status, _ := mustNotQueryCluster(t, handler, `SELECT value FROM treasures WHERE time > now() - 5m AND (type = 'gold' OR type = 'silver' OR type = 'trash') GROUP BY time(1m)`)
 	assert.Equal(t, 400, status)
 }
@@ -95,11 +101,15 @@ func setup() {
 	// trash = 1583631877
 	// silver = 3042244896
 	// gold = 3966162835
+}
 
+func writeTestPoints() {
+	clnt1 := newClient(influxOne)
 	writePoints([]*influx.Point{
 		newPoint("trash", 0),
 	}, clnt1)
 
+	clnt2 := newClient(influxTwo)
 	writePoints([]*influx.Point{
 		newPoint("gold", 100),
 		newPoint("silver", 50),
@@ -108,8 +118,11 @@ func setup() {
 	time.Sleep(time.Millisecond * 500)
 }
 
-func setUpSelectTest() *QueryHandler {
+func setUpSelectTest(populatePoints bool) *QueryHandler {
 	setup()
+	if populatePoints {
+		writeTestPoints()
+	}
 	handler := NewQueryHandler(newTestResolver(), newPartitioner(),
 		nil, nil)
 	return handler

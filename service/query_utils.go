@@ -20,7 +20,7 @@ type Message struct {
 }
 
 type Result struct {
-	StatementID int           `json:"statement_id"`
+	StatementID int           `json:"statement_id,omitempty"`
 	Series      []*models.Row `json:"series,omitempty"`
 	Messages    []*Message    `json:"messages,omitempty"`
 	Partial     bool          `json:"partial,omitempty"`
@@ -72,7 +72,15 @@ func jsonError(w http.ResponseWriter, code int, message string) {
 
 func respondWithResults(w http.ResponseWriter, results []Result) {
 	w.Header().Set("Content-Type", "application/json")
-	data, _ := json.Marshal(response{results})
+	var res response
+	if results == nil {
+		// Influx always returns an array of results even though no data exists to return.
+		// This is necessary as some clients may be expecting the results field to exist with at least one object.
+		res = response{[]Result{{}}}
+	} else {
+		res = response{results}
+	}
+	data, _ := json.Marshal(res)
 	w.Header().Add("X-InfluxDB-Version", "relay")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(data))
