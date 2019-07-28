@@ -2,13 +2,60 @@
 A distributed clustering system for production deployments of InfluxDB with high availability and horizontal scalability via partitioning.
 
 *Partitioning is not different from what is often called "sharding" in NoSQL database systems. However, InfluxDB already uses the term "sharding" to refer to
-splitting individual series into chunks, called chards, based on time. In order to scale writes, it would not work to shard data using only time chunks as most writes would be made
+splitting individual series into chunks, called "shards", based on time. In order to scale writes, it would not work to shard data using only time chunks as most writes would be made
 to the same chunk on the same node. Instead, in this implementation, entire series are distributed to different nodes which we call "partitioning".* 
 
 ## Not ready for production
-Altough most functionality is implemented, it has not yet been tested with high load. There are possibly memory leaks and other performance issues that will surface when running in production.
+Altough most functionality is implemented, it has not yet been tested with high load. There are possibly memory leaks, performance issues, bugs and missing critical functionality that will surface when running in production.
 
 Also, some of the instructions below refer to functionality that is not yet implemented completely. 
+
+## Testing it locally
+One can easily start a cluster using either docker-compose or Kubernetes configurations available in this repo. The following guides will result in starting an InfluxDB shell conneted to the cluster nodes. In the shell, you can make inserts and queries just like a regular InfluxDB shell. Inserts will be distributed for redundancy by default. If a partition key is defined, it will also partition the data. Queries will also be rediriected to a node that holds data automatically based on the partition key. 
+
+### Using Docker Compose
+Run the following command to start the cluster in the project's root directory:
+```
+docker-compose up -d
+```
+It will create three cluster nodes on the same machine with one container for the cluster proxy (this software) and a container just for InfluxDB for each node. 
+
+One of the cluster proxies will listen of the default InfluxDB port 8086, so you can connect to it by just running `influx` in your terminal if you have the InfluxDB CLI installed. The command `SHOW NODES` is handled by the cluster proxy so you can see that the cluster is up and running.
+
+```
+➜ influxdb-ha git:(master) ✗ influx 
+InfluxDB shell version: v1.7.7
+> show nodes
+name: nodes
+name             data location
+----             -------------
+influxdb-handle  influxdb-1:8086
+influxdb-handle2 influxdb-2:8086
+influxdb-handle3 influxdb-3:8086
+
+```
+
+### Using Kubernetes
+See the Readme file in the kubernetes folder in this repo to learn more. 
+
+```
+cd kubernetes
+minikube start
+bin/clean
+bin/start
+bin/influx
+InfluxDB shell version: v1.7.7
+> show nodes
+name: nodes
+name             data location
+----             -------------
+influx-cluster-0 influx-cluster-0.influxc:8086
+influx-cluster-2 influx-cluster-2.influxc:8086
+> CREATE USER admin WITH PASSWORD 'password' WITH ALL PRIVILEGES
+> auth
+username: admin
+password: 
+```
 
 ## Etcd
 The cluster is dependent on etcd for storing data used for clustering mechanisms. It is preferable 
